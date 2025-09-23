@@ -74,6 +74,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
   final _GameModel model = _GameModel();
   final math.Random rng = math.Random();
   final _Audio audio = _Audio();
+  static const double _speedFactor = 0.5; // Global pacing: 0.5 = half speed
 
   @override
   void initState() {
@@ -103,6 +104,9 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
     // Obtain size from context if available
     final size = context.size;
     if (size == null) return;
+
+    // Calculate road rect once per frame (needed for pixel-based scroll pacing)
+    final road = _roadRectForSize(Size(size.width, size.height));
 
     // Simulate
     switch (model.state) {
@@ -138,11 +142,15 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
     // Apply button input steering
     final steer = (model.rightPressed ? 1.0 : 0.0) - (model.leftPressed ? 1.0 : 0.0);
     if (steer != 0) {
-      model.player.x = (model.player.x + steer * dt * 1.4).clamp(-1.0, 1.0);
+      model.player.x = (model.player.x + steer * dt * 0.7).clamp(-1.0, 1.0);
     }
 
-    // Scroll road relative to speed
-    model.scroll = (model.scroll + dt * (2.5 + 6.0 * model.speed)) % 1000;
+    // Scroll road relative to perceived forward speed.
+    // Use road height to convert normalized speed to pixels per second and
+    // bias stripes to move a bit faster than traffic for stronger motion.
+    final stripeBias = 2.2; // stripes ~10% faster than cars after _speedFactor
+    final pixelsPerSec = (0.8 + 2.8 * model.speed) * road.height * stripeBias * _speedFactor;
+    model.scroll = (model.scroll + dt * pixelsPerSec) % (road.height * 1000);
 
     // Day/Night cycle over ~40s
     final phase = (elapsed.inMilliseconds / 40000.0) % 2.0; // 0..2
@@ -150,14 +158,14 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
 
     // Spawn AI traffic while running
     if (model.state == _GameState.running) {
-      model.spawnCooldown -= dt * (0.6 + model.speed);
+      model.spawnCooldown -= dt * (0.6 + model.speed) * _speedFactor;
       if (model.spawnCooldown <= 0) {
         model.spawnCooldown = rng.nextDouble() * 0.9 + 0.6; // 0.6..1.5s
         final lane = rng.nextInt(3) - 1; // -1,0,1
         model.traffic.add(_Car(lane * 0.5, 1.1, 0.12, 0.18));
       }
       // Hazards spawn
-      model.hazardCooldown -= dt * (0.5 + model.speed * 0.8);
+      model.hazardCooldown -= dt * (0.5 + model.speed * 0.8) * _speedFactor;
       if (model.hazardCooldown <= 0) {
         model.hazardCooldown = rng.nextDouble() * 2.0 + 1.0; // 1..3s
         final lane = (rng.nextInt(3) - 1) * 0.5;
@@ -168,7 +176,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
 
     // Move traffic toward player; remove offscreen and add score
     for (final c in model.traffic) {
-      c.y -= dt * (0.8 + 2.8 * model.speed);
+      c.y -= dt * (0.8 + 2.8 * model.speed) * _speedFactor;
     }
     model.traffic.removeWhere((c) {
       if (c.y < -0.3) {
@@ -186,11 +194,10 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
     _clampPlayer();
 
     // Collisions
-    final road = _roadRectForSize(Size(size.width, size.height));
     final pRect = model.player.toRect(road);
     // Hazards move
     for (final h in model.hazards) {
-      h.y -= dt * (0.7 + 2.4 * model.speed);
+      h.y -= dt * (0.7 + 2.4 * model.speed) * _speedFactor;
     }
     model.hazards.removeWhere((h) => h.y < -0.2);
     for (final h in model.hazards) {
@@ -354,8 +361,9 @@ class _LeMansPainter extends CustomPainter {
   void _drawHatch(Canvas canvas, Rect r) {
     final p1 = Paint()..color = C64Palette.white;
     final p2 = Paint()..color = C64Palette.black;
+    // Fixed stripe height so they scroll (no stretching).
     final stripeH = 12.0;
-    double y = -model.scroll % (stripeH * 2);
+    double y = model.scroll % (stripeH * 2);
     while (y < r.height) {
       canvas.drawRect(Rect.fromLTWH(r.left, y, r.width, stripeH), p1);
       canvas.drawRect(Rect.fromLTWH(r.left, y + stripeH, r.width, stripeH), p2);
@@ -365,13 +373,15 @@ class _LeMansPainter extends CustomPainter {
 
   void _drawCenterDashes(Canvas canvas, Size size) {
     final cx = road.center.dx;
+    // Fixed dash size so segments don't stretch while scrolling.
     final dashH = 24.0;
     final dashW = road.width * 0.018;
     final p = Paint()..color = C64Palette.white;
-    double y = -model.scroll % (dashH * 3);
+    const spacingFactor = 2.6; // constant spacing for steady motion
+    double y = model.scroll % (dashH * spacingFactor);
     while (y < size.height) {
       canvas.drawRect(Rect.fromCenter(center: Offset(cx, y), width: dashW, height: dashH), p);
-      y += dashH * 3;
+      y += dashH * spacingFactor;
     }
   }
 
@@ -457,7 +467,7 @@ class _LeMansPainter extends CustomPainter {
       final col = i < filled ? _dim(C64Palette.cyan) : _dim(C64Palette.cyan, 0.15);
       canvas.drawRRect(r, Paint()..color = col);
     }
-    final kmh = (40 + model.speed * 240).round();
+    final kmh = (40 + model.speed * 120).round();
     text('   $kmh KM/H', C64Palette.white, y + h + 6);
 
     if (model.state == _GameState.gameOver) {
