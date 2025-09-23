@@ -4,6 +4,7 @@ import 'package:flutter/scheduler.dart';
 import 'palette.dart';
 import 'dart:typed_data';
 import 'package:audioplayers/audioplayers.dart';
+import '../config.dart';
 
 // Page entry is defined at the bottom as a StatelessWidget.
 
@@ -45,6 +46,10 @@ class _GameModel {
   double night = 0.0;
   int countdownTick = 3; // last whole number observed
   int passed = 0;
+  double fuel = 100.0; // 0..100
+  double comboTimer = 0.0; int combo = 0;
+  double shake = 0.0; // camera shake time
+  GameConfig config = const GameConfig();
 }
 
 enum _HazardType { oil, puddle }
@@ -75,6 +80,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
   final math.Random rng = math.Random();
   final _Audio audio = _Audio();
   static const double _speedFactor = 0.5; // Global pacing: 0.5 = half speed
+  final _EngineAudio _engine = _EngineAudio();
 
   @override
   void initState() {
@@ -91,6 +97,9 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
     model.score = 0;
     model.traffic.clear();
     model.spawnCooldown = 0.5;
+    model.fuel = 100.0;
+    model.combo = 0; model.comboTimer = 0;
+    model.shake = 0.0;
   }
 
   void _onTick(Duration elapsed) {
@@ -126,8 +135,11 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
         break;
       case _GameState.running:
         // target speed ramps to 1.0
-        model.speed = (model.speed + dt * 0.35).clamp(0.0, 1.0);
+        model.speed = (model.speed + dt * 0.35 / model.config.difficulty).clamp(0.0, 1.0);
         model.timeLeft -= dt;
+        // Fuel consumption scales with speed and difficulty
+        model.fuel -= dt * (0.5 + model.speed * 1.2) * model.config.difficulty;
+        if (model.fuel < 0) model.fuel = 0;
         if (model.timeLeft <= 0) {
           model.timeLeft = 0;
           model.state = _GameState.gameOver;
@@ -158,20 +170,23 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
 
     // Spawn AI traffic while running
     if (model.state == _GameState.running) {
-      model.spawnCooldown -= dt * (0.6 + model.speed) * _speedFactor;
+      model.spawnCooldown -= dt * (0.6 + model.speed) * _speedFactor * model.config.difficulty;
       if (model.spawnCooldown <= 0) {
-        model.spawnCooldown = rng.nextDouble() * 0.9 + 0.6; // 0.6..1.5s
+        model.spawnCooldown = (rng.nextDouble() * 0.9 + 0.6) / model.config.difficulty; // faster on hard
         final lane = rng.nextInt(3) - 1; // -1,0,1
         model.traffic.add(_Car(lane * 0.5, 1.1, 0.12, 0.18));
       }
       // Hazards spawn
-      model.hazardCooldown -= dt * (0.5 + model.speed * 0.8) * _speedFactor;
+      model.hazardCooldown -= dt * (0.5 + model.speed * 0.8) * _speedFactor * model.config.difficulty;
       if (model.hazardCooldown <= 0) {
-        model.hazardCooldown = rng.nextDouble() * 2.0 + 1.0; // 1..3s
+        model.hazardCooldown = (rng.nextDouble() * 2.0 + 1.0) / model.config.difficulty; // 1..3s scaled
         final lane = (rng.nextInt(3) - 1) * 0.5;
         final type = rng.nextBool() ? _HazardType.oil : _HazardType.puddle;
         model.hazards.add(_Hazard(type, lane.toDouble(), 1.05));
       }
+      // Combo timer decay
+      model.comboTimer -= dt;
+      if (model.comboTimer < 0) { model.comboTimer = 0; model.combo = 0; }
     }
 
     // Move traffic toward player; remove offscreen and add score
@@ -180,7 +195,8 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
     }
     model.traffic.removeWhere((c) {
       if (c.y < -0.3) {
-        model.score += 10;
+        model.combo += 1; model.comboTimer = 2.0;
+        model.score += 10 * math.max(1, model.combo ~/ 3);
         model.passed += 1;
         if (model.passed % 5 == 0 && model.state == _GameState.running) {
           model.timeLeft = math.min(99, model.timeLeft + 1.0); // small reward
@@ -207,10 +223,12 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
           model.player.x += (rng.nextDouble() - 0.5) * 0.3;
           model.speed = math.max(0.3, model.speed * 0.6);
           audio.beep(220, 90);
+          model.shake = 0.2;
         } else {
           // puddle slows down a bit and darkens screen briefly
           model.speed = math.max(0.25, model.speed * 0.7);
           audio.beep(300, 80);
+          model.shake = 0.15;
         }
       }
     }
@@ -220,9 +238,15 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
         model.speed = 0.2;
         model.timeLeft = math.max(0, model.timeLeft - 3.0);
         audio.beep(120, 120);
+        model.shake = 0.25;
         break;
       }
     }
+
+    // Engine audio follow speed
+    _engine.update(model.speed);
+    // Shake decay
+    if (model.shake > 0) model.shake = math.max(0, model.shake - dt * 1.4);
 
     setState(() {});
   }
@@ -279,6 +303,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
   void dispose() {
     _ticker.dispose();
     audio.dispose();
+    _engine.dispose();
     super.dispose();
   }
 }
@@ -300,6 +325,12 @@ class _LeMansPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    // Camera shake
+    if (model.shake > 0) {
+      final dx = (math.sin(model.scroll * 0.05) * 1.0) * (model.shake * 6);
+      final dy = (math.cos(model.scroll * 0.04) * 1.0) * (model.shake * 6);
+      canvas.translate(dx, dy);
+    }
     final bg = Paint()..color = C64Palette.black;
     canvas.drawRect(Offset.zero & size, bg);
 
@@ -356,6 +387,12 @@ class _LeMansPainter extends CustomPainter {
 
     // HUD
     _drawHud(canvas, size);
+
+    // Headlights mask at night
+    if (model.night > 0.4) {
+      final darkness = (model.night - 0.4) / 0.6; // 0..1
+      _drawHeadlights(canvas, size, darkness);
+    }
   }
 
   void _drawHatch(Canvas canvas, Rect r) {
@@ -487,6 +524,26 @@ class _LeMansPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _LeMansPainter oldDelegate) => true;
+
+  void _drawHeadlights(Canvas canvas, Size size, double intensity) {
+    final paint = Paint();
+    // Dark overlay layer
+    canvas.saveLayer(Offset.zero & size, Paint());
+    canvas.drawRect(Offset.zero & size, Paint()..color = Color.fromARGB((140 * intensity).round(), 0, 0, 0));
+    // Carve a soft cone around the player
+    final car = model.player.toRect(road);
+    final center = Offset(car.center.dx, car.top - car.height * 0.2);
+    final radius = road.width * 0.6;
+    final gradient = RadialGradient(
+      colors: [Colors.black, Colors.transparent],
+      stops: const [0.0, 1.0],
+    ).createShader(Rect.fromCircle(center: center, radius: radius));
+    paint
+      ..shader = gradient
+      ..blendMode = BlendMode.dstOut;
+    canvas.drawCircle(center, radius, paint);
+    canvas.restore();
+  }
 }
 
 class _Audio {
@@ -527,8 +584,35 @@ Uint8List _sineWavBytes({required int freq, required int ms, double vol = 1.0}) 
   return data.toBytes();
 }
 
+class _EngineAudio {
+  final AudioPlayer _p = AudioPlayer();
+  int _lastFreq = 0;
+  bool _started = false;
+  Future<void> update(double speed) async {
+    final freq = (140 + speed * 320).round();
+    final vol = 0.05 + speed * 0.15;
+    if (!_started) {
+      final bytes = _sineWavBytes(freq: freq, ms: 200, vol: vol);
+      await _p.setReleaseMode(ReleaseMode.loop);
+      await _p.play(BytesSource(bytes));
+      _started = true;
+      _lastFreq = freq;
+    } else if ((freq - _lastFreq).abs() > 20) {
+      // Refresh loop with new pitch occasionally to avoid choppiness
+      final bytes = _sineWavBytes(freq: freq, ms: 200, vol: vol);
+      await _p.stop();
+      await _p.play(BytesSource(bytes));
+      _lastFreq = freq;
+    } else {
+      await _p.setVolume(vol.clamp(0.0, 1.0));
+    }
+  }
+  void dispose() { _p.dispose(); }
+}
+
 class LeMansPage extends StatelessWidget {
-  const LeMansPage({super.key});
+  final GameConfig config;
+  const LeMansPage({super.key, this.config = const GameConfig()});
 
   @override
   Widget build(BuildContext context) {
@@ -537,6 +621,7 @@ class LeMansPage extends StatelessWidget {
       body: SafeArea(
         child: _GameTicker(
           builder: (context, model, road) {
+            model.config = config;
             return Stack(
               children: [
                 Positioned.fill(
@@ -545,7 +630,7 @@ class LeMansPage extends StatelessWidget {
                   ),
                 ),
                 // On-screen buttons
-                Positioned(
+                if (config.controlMode != ControlMode.drag) Positioned(
                   left: 0,
                   right: 0,
                   bottom: 12,

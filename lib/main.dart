@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'src/lemans/lemans_page.dart';
+import 'src/menu/menu_page.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -24,7 +24,7 @@ class RaceDriverApp extends StatelessWidget {
           titleLarge: TextStyle(fontFamily: 'VT323', fontSize: 24),
         ),
       ),
-      home: const LeMansPage(),
+      home: const MenuPage(),
     );
   }
 }
