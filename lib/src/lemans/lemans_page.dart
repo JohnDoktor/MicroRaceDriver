@@ -8,7 +8,7 @@ import '../config.dart';
 
 // Page entry is defined at the bottom as a StatelessWidget.
 
-enum _GameState { countdown, running, gameOver }
+enum _GameState { countdown, running, paused, gameOver }
 
 class _Car {
   double x; // -1..1 relative to road center
@@ -100,7 +100,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
   final _GameModel model = _GameModel();
   final math.Random rng = math.Random();
   final _Audio audio = _Audio();
-  static const double _speedFactor = 0.5; // Global pacing: 0.5 = half speed
+  static const double _speedFactor = 0.35; // Global pacing: slower overall
   final _EngineAudio _engine = _EngineAudio();
 
   @override
@@ -156,7 +156,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
         break;
       case _GameState.running:
         // target speed ramps to 1.0
-        model.speed = (model.speed + dt * 0.35 / model.config.difficulty).clamp(0.0, 1.0);
+        model.speed = (model.speed + dt * 0.25 / model.config.difficulty).clamp(0.0, 1.0);
         model.timeLeft -= dt;
         // Fuel consumption scales with speed and difficulty
         model.fuel -= dt * (0.5 + model.speed * 1.2) * model.config.difficulty;
@@ -167,6 +167,9 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
           model.hiScore = math.max(model.hiScore, model.score);
         }
         break;
+      case _GameState.paused:
+        // no simulation while paused
+        break;
       case _GameState.gameOver:
         model.speed = model.speed * 0.98;
         break;
@@ -175,13 +178,13 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
     // Apply button input steering
     final steer = (model.rightPressed ? 1.0 : 0.0) - (model.leftPressed ? 1.0 : 0.0);
     if (steer != 0) {
-      model.player.x = (model.player.x + steer * dt * 0.7).clamp(-1.0, 1.0);
+      model.player.x = (model.player.x + steer * dt * 0.55).clamp(-1.0, 1.0);
     }
 
     // Scroll road relative to perceived forward speed.
     // Use road height to convert normalized speed to pixels per second and
     // bias stripes to move a bit faster than traffic for stronger motion.
-    final stripeBias = 2.2; // stripes ~10% faster than cars after _speedFactor
+    final stripeBias = 2.0; // stripes a bit faster than traffic
     final pixelsPerSec = (0.8 + 2.8 * model.speed) * road.height * stripeBias * _speedFactor;
     model.scroll = (model.scroll + dt * pixelsPerSec) % (road.height * 1000);
 
@@ -211,14 +214,14 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
     if (model.state == _GameState.running) {
       model.spawnCooldown -= dt * (0.6 + model.speed) * _speedFactor * model.config.difficulty;
       if (model.spawnCooldown <= 0) {
-        model.spawnCooldown = (rng.nextDouble() * 0.9 + 0.6) / model.config.difficulty; // faster on hard
+        model.spawnCooldown = (rng.nextDouble() * 1.2 + 0.8) / model.config.difficulty; // fewer cars at easy pace
         final lane = rng.nextInt(3) - 1; // -1,0,1
         model.traffic.add(_Car(lane * 0.5, 1.1, 0.12, 0.18));
       }
       // Hazards spawn
       model.hazardCooldown -= dt * (0.5 + model.speed * 0.8) * _speedFactor * model.config.difficulty;
       if (model.hazardCooldown <= 0) {
-        model.hazardCooldown = (rng.nextDouble() * 2.0 + 1.0) / model.config.difficulty; // 1..3s scaled
+        model.hazardCooldown = (rng.nextDouble() * 2.8 + 1.2) / model.config.difficulty; // spawn less often
         final lane = (rng.nextInt(3) - 1) * 0.5;
         final type = rng.nextBool() ? _HazardType.oil : _HazardType.puddle;
         model.hazards.add(_Hazard(type, lane.toDouble(), 1.05));
@@ -419,6 +422,8 @@ class _LeMansPainter extends CustomPainter {
     // Edge hatch stripes
     _drawHatch(canvas, Rect.fromLTWH(road.left, 0, road.width * 0.04, size.height));
     _drawHatch(canvas, Rect.fromLTWH(road.right - road.width * 0.04, 0, road.width * 0.04, size.height));
+    // Roadside posts (parallax)
+    _drawRoadsidePosts(canvas, size);
 
     // Center dashed line
     _drawCenterDashes(canvas, size);
@@ -500,6 +505,25 @@ class _LeMansPainter extends CustomPainter {
     while (y < size.height) {
       canvas.drawRect(Rect.fromCenter(center: Offset(cx, y), width: dashW, height: dashH), p);
       y += dashH * spacingFactor;
+    }
+  }
+
+  void _drawRoadsidePosts(Canvas canvas, Size size) {
+    final postW = road.width * 0.014;
+    final postH = 18.0;
+    final spacing = 46.0; // pixels between posts
+    double y = model.scroll % spacing;
+    final leftX = road.left - postW * 0.5 + road.width * 0.04; // just outside left strip
+    final rightX = road.right - road.width * 0.04 - postW * 0.5; // just outside right strip
+    final paint1 = Paint()..color = Colors.white70;
+    final paint2 = Paint()..color = Colors.grey.shade700;
+    int i = 0;
+    while (y < size.height) {
+      final p = (i % 2 == 0) ? paint1 : paint2;
+      canvas.drawRect(Rect.fromLTWH(leftX, y, postW, postH), p);
+      canvas.drawRect(Rect.fromLTWH(rightX, y + spacing * 0.5, postW, postH), p);
+      y += spacing;
+      i++;
     }
   }
 
@@ -602,6 +626,8 @@ class _LeMansPainter extends CustomPainter {
       )..layout(maxWidth: size.width * 0.8);
       tp.paint(canvas, Offset((size.width - tp.width) / 2, (size.height - tp.height) / 2));
     }
+    // Hazard/traffic warnings: small arrows if something is close ahead
+    _drawWarnings(canvas, size);
   }
 
   @override
@@ -625,6 +651,45 @@ class _LeMansPainter extends CustomPainter {
       ..blendMode = BlendMode.dstOut;
     canvas.drawCircle(center, radius, paint);
     canvas.restore();
+  }
+
+  void _drawWarnings(Canvas canvas, Size size) {
+    final pRect = model.player.toRect(road);
+    bool leftWarn = false, rightWarn = false;
+    // lookahead window directly ahead of car
+    for (final c in model.traffic) {
+      final r = c.toRect(road);
+      if (r.top < pRect.top - 40 && r.top > pRect.top - size.height * 0.45) {
+        if (r.center.dx < pRect.center.dx - pRect.width * 0.2) leftWarn = true;
+        if (r.center.dx > pRect.center.dx + pRect.width * 0.2) rightWarn = true;
+      }
+    }
+    for (final h in model.hazards) {
+      final r = h.toRect(road);
+      if (r.top < pRect.top - 40 && r.top > pRect.top - size.height * 0.45) {
+        if (r.center.dx < pRect.center.dx - pRect.width * 0.2) leftWarn = true;
+        if (r.center.dx > pRect.center.dx + pRect.width * 0.2) rightWarn = true;
+      }
+    }
+    final paint = Paint()..color = C64Palette.green;
+    void arrow(Offset center, bool left) {
+      final path = Path();
+      final s = 10.0;
+      if (left) {
+        path.moveTo(center.dx + s, center.dy - s);
+        path.lineTo(center.dx - s, center.dy);
+        path.lineTo(center.dx + s, center.dy + s);
+      } else {
+        path.moveTo(center.dx - s, center.dy - s);
+        path.lineTo(center.dx + s, center.dy);
+        path.lineTo(center.dx - s, center.dy + s);
+      }
+      path.close();
+      canvas.drawPath(path, paint);
+    }
+    final y = road.top + 40;
+    if (leftWarn) arrow(Offset(road.left + 24, y), true);
+    if (rightWarn) arrow(Offset(road.right - 24, y), false);
   }
 }
 
@@ -711,6 +776,20 @@ class LeMansPage extends StatelessWidget {
                     painter: _LeMansPainter(model, road),
                   ),
                 ),
+                // Pause button
+                Positioned(
+                  top: 8,
+                  left: 8,
+                  child: _PauseButton(onPressed: () {
+                    if (model.state == _GameState.running) {
+                      model.state = _GameState.paused;
+                    } else if (model.state == _GameState.paused) {
+                      model.state = _GameState.running;
+                    }
+                  }),
+                ),
+                if (model.state == _GameState.paused)
+                  Positioned.fill(child: _PauseOverlay(model: model)),
                 // On-screen buttons
                 if (config.controlMode != ControlMode.drag) Positioned(
                   left: 0,
@@ -735,6 +814,90 @@ class LeMansPage extends StatelessWidget {
               ],
             );
           },
+        ),
+      ),
+    );
+  }
+}
+
+class _PauseButton extends StatelessWidget {
+  final VoidCallback onPressed;
+  const _PauseButton({required this.onPressed});
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onPressed,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: Colors.white10,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.white30),
+        ),
+        child: const Text('II', style: TextStyle(fontFamily: 'VT323', fontSize: 22, color: Colors.white)),
+      ),
+    );
+  }
+}
+
+class _PauseOverlay extends StatefulWidget {
+  final _GameModel model;
+  const _PauseOverlay({required this.model});
+  @override
+  State<_PauseOverlay> createState() => _PauseOverlayState();
+}
+
+class _PauseOverlayState extends State<_PauseOverlay> {
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: const Color.fromARGB(160, 0, 0, 0),
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(color: Colors.black, border: Border.all(color: Colors.white30), borderRadius: BorderRadius.circular(12)),
+          width: MediaQuery.of(context).size.width * 0.8,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Paused', style: TextStyle(fontFamily: 'VT323', fontSize: 28, color: Colors.white)),
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('Difficulty', style: TextStyle(fontFamily: 'VT323', fontSize: 18, color: Colors.white70)),
+                  Slider(min: 0.7, max: 1.3, divisions: 6, value: widget.model.config.difficulty,
+                    onChanged: (v) => setState(() => widget.model.config = GameConfig(controlMode: widget.model.config.controlMode, difficulty: v))),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('Controls', style: TextStyle(fontFamily: 'VT323', fontSize: 18, color: Colors.white70)),
+                  DropdownButton<ControlMode>(
+                    value: widget.model.config.controlMode,
+                    dropdownColor: Colors.black,
+                    style: const TextStyle(fontFamily: 'VT323', fontSize: 18, color: Colors.white),
+                    items: const [
+                      DropdownMenuItem(value: ControlMode.drag, child: Text('Drag')),
+                      DropdownMenuItem(value: ControlMode.buttons, child: Text('Buttons')),
+                      DropdownMenuItem(value: ControlMode.both, child: Text('Both')),
+                    ],
+                    onChanged: (m) => setState(() => widget.model.config = GameConfig(controlMode: m ?? ControlMode.both, difficulty: widget.model.config.difficulty)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  ElevatedButton(onPressed: () => setState(() => widget.model.state = _GameState.running), child: const Text('Resume', style: TextStyle(fontFamily: 'VT323', fontSize: 20))),
+                  ElevatedButton(onPressed: () { widget.model.state = _GameState.gameOver; }, child: const Text('End', style: TextStyle(fontFamily: 'VT323', fontSize: 20))),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
