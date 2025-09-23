@@ -39,6 +39,9 @@ class _GameModel {
   // Hazards
   final List<_Hazard> hazards = <_Hazard>[];
   double hazardCooldown = 1.0;
+  // Pickups
+  final List<_Pickup> pickups = <_Pickup>[];
+  double pickupCooldown = 3.0;
   // Input
   bool leftPressed = false;
   bool rightPressed = false;
@@ -50,9 +53,14 @@ class _GameModel {
   double comboTimer = 0.0; int combo = 0;
   double shake = 0.0; // camera shake time
   GameConfig config = const GameConfig();
+  // Curving road state
+  double curveOffset = 0.0; // -1..1, shifts road center
+  double curveTarget = 0.0; // target offset
+  double curveChangeTimer = 2.0; // seconds until new target
 }
 
 enum _HazardType { oil, puddle }
+enum _PickupType { fuel }
 
 class _Hazard {
   final _HazardType type;
@@ -64,6 +72,19 @@ class _Hazard {
     final s = road.width * 0.11;
     final bottom = road.bottom - y * road.height;
     return Rect.fromCenter(center: Offset(cx, bottom - s * 0.5), width: s, height: s * 0.65);
+  }
+}
+
+class _Pickup {
+  final _PickupType type;
+  double x; // -1..1
+  double y; // 0..1 from bottom to top
+  _Pickup(this.type, this.x, this.y);
+  Rect toRect(Rect road) {
+    final cx = road.center.dx + x * (road.width * 0.45);
+    final s = road.width * 0.1;
+    final bottom = road.bottom - y * road.height;
+    return Rect.fromCenter(center: Offset(cx, bottom - s * 0.5), width: s, height: s);
   }
 }
 
@@ -168,6 +189,24 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
     final phase = (elapsed.inMilliseconds / 40000.0) % 2.0; // 0..2
     model.night = phase < 1 ? phase : (2 - phase);
 
+    // Curvature evolution: pick a new target periodically and ease toward it.
+    model.curveChangeTimer -= dt;
+    if (model.curveChangeTimer <= 0) {
+      model.curveChangeTimer = rng.nextDouble() * 4.0 + 3.0; // 3..7s
+      model.curveTarget = (rng.nextDouble() * 2 - 1) * 0.9; // -0.9..0.9
+    }
+    final oldCurve = model.curveOffset;
+    final curveDelta = (model.curveTarget - model.curveOffset);
+    final maxStep = dt * 0.25 * (0.6 + model.speed); // faster at speed
+    if (curveDelta.abs() > maxStep) {
+      model.curveOffset += maxStep * curveDelta.sign;
+    } else {
+      model.curveOffset = model.curveTarget;
+    }
+    // Inertial drift pushes the car outward during curve transitions
+    final curveVel = (model.curveOffset - oldCurve) / (dt > 0 ? dt : 1);
+    model.player.x += curveVel * 0.15 * (0.6 + model.speed);
+
     // Spawn AI traffic while running
     if (model.state == _GameState.running) {
       model.spawnCooldown -= dt * (0.6 + model.speed) * _speedFactor * model.config.difficulty;
@@ -183,6 +222,13 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
         final lane = (rng.nextInt(3) - 1) * 0.5;
         final type = rng.nextBool() ? _HazardType.oil : _HazardType.puddle;
         model.hazards.add(_Hazard(type, lane.toDouble(), 1.05));
+      }
+      // Fuel pickups spawn more rarely
+      model.pickupCooldown -= dt * (0.25 + model.speed * 0.5) * _speedFactor;
+      if (model.pickupCooldown <= 0) {
+        model.pickupCooldown = rng.nextDouble() * 5.0 + 6.0; // ~6..11s
+        final lane = (rng.nextInt(3) - 1) * 0.5;
+        model.pickups.add(_Pickup(_PickupType.fuel, lane.toDouble(), 1.05));
       }
       // Combo timer decay
       model.comboTimer -= dt;
@@ -216,6 +262,11 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
       h.y -= dt * (0.7 + 2.4 * model.speed) * _speedFactor;
     }
     model.hazards.removeWhere((h) => h.y < -0.2);
+    // Pickups move
+    for (final p in model.pickups) {
+      p.y -= dt * (0.7 + 2.4 * model.speed) * _speedFactor;
+    }
+    model.pickups.removeWhere((p) => p.y < -0.2);
     for (final h in model.hazards) {
       if (h.toRect(road).overlaps(pRect)) {
         if (h.type == _HazardType.oil) {
@@ -232,6 +283,20 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
         }
       }
     }
+    for (final p in model.pickups) {
+      if (p.toRect(road).overlaps(pRect)) {
+        switch (p.type) {
+          case _PickupType.fuel:
+            model.fuel = math.min(100.0, model.fuel + 25);
+            model.score += 50;
+            audio.beep(880, 70);
+            audio.beep(660, 70);
+            break;
+        }
+        p.y = -1; // mark for removal
+      }
+    }
+    model.pickups.removeWhere((p) => p.y < 0);
     for (final car in model.traffic) {
       if (car.toRect(road).overlaps(pRect)) {
         // Simple collision penalty
@@ -255,7 +320,9 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
 
   Rect _roadRectForSize(Size s) {
     final w = s.width * 0.86; // road+edges width region
-    final left = (s.width - w) * 0.5;
+    final maxShift = s.width * 0.18; // sway left/right
+    final centerX = s.width * 0.5 + model.curveOffset.clamp(-1.0, 1.0) * maxShift;
+    final left = (centerX - w * 0.5).clamp(0.0, s.width - w);
     return Rect.fromLTWH(left, 0, w, s.height);
   }
 
@@ -377,6 +444,20 @@ class _LeMansPainter extends CustomPainter {
       }
     }
 
+    // Pickups
+    for (final p in model.pickups) {
+      final r = p.toRect(road);
+      switch (p.type) {
+        case _PickupType.fuel:
+          final paint = Paint()..color = const Color(0xFFFFD54F);
+          canvas.drawRRect(RRect.fromRectAndRadius(r, const Radius.circular(3)), paint);
+          // small fuel icon stripe
+          canvas.drawRect(Rect.fromLTWH(r.left + r.width*0.2, r.top + r.height*0.4, r.width*0.6, r.height*0.2),
+            Paint()..color = Colors.brown);
+          break;
+      }
+    }
+
     // Traffic
     for (final c in model.traffic) {
       _drawCar(canvas, c.toRect(road), body: _dim(const Color(0xFFDDDDDD)));
@@ -492,6 +573,7 @@ class _LeMansPainter extends CustomPainter {
     double y = top;
     y += text('SCORE  ${model.score}', C64Palette.white, y) + 6;
     y += text('TIME   ${model.timeLeft.ceil()}', C64Palette.green, y) + 6;
+    y += text('FUEL   ${model.fuel.round()}%', C64Palette.white, y) + 6;
     y += text('HI-SCORE ${model.hiScore}', C64Palette.green, y) + 10;
     y += text('SPEED', C64Palette.white, y) + 4;
     // speed meter boxes (3)
