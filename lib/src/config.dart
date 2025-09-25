@@ -5,6 +5,7 @@ class GameConfig {
   final double sfxVolume;   // 0..1
   final bool musicEnabled;
   final bool sfxEnabled;
+  final bool lowGraphics;   // reduce visuals for performance
   const GameConfig({
     this.controlMode = ControlMode.both,
     this.difficulty = 1.0,
@@ -12,6 +13,7 @@ class GameConfig {
     this.sfxVolume = 1.0,
     this.musicEnabled = true,
     this.sfxEnabled = true,
+    this.lowGraphics = false,
   });
 }
 

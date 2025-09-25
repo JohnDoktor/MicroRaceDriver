@@ -1,62 +1,60 @@
 **Project Overview**
-- **Name:** `RaceDriver` (Flutter arcade racer)
-- **Core Loop:** Ticker-driven update; `CustomPainter` renders C64-like road, cars, HUD.
-- **Entry:** `lib/main.dart` → `MenuPage` → `LeMansPage`.
-- **Target Platforms:** iOS (Simulator used), macOS, Android, Web (scaffolded).
+- Name: `RaceDriver` (Flutter arcade racer)
+- Rendering: CustomPainter road, cars, HUD; C64-inspired palette.
+- Entry: `lib/main.dart` → `MenuPage` → `LeMansPage`.
+- Platforms: iOS (actively tested), Android/macOS/web scaffolded.
 
-**Gameplay Mechanics**
-- **States:** Countdown → Running → Paused → Game Over.
-- **Player:** Horizontal lane-based car; drag and/or on-screen arrow buttons.
-- **World:** AI traffic, hazards (oil, puddle), fuel pickups, road curvature/width dynamics, day/night dimming, camera shake.
-- **Systems:** Score, time, fuel, combo, risk-based multiplier, high score.
+**Core Gameplay**
+- States: Countdown → Running → Game Over (timer removed).
+- Player: lane-based car (drag + optional on-screen arrows). Arrows are 3× speed, disabled at `speed == 0`.
+- World: AI traffic, hazards (oil/puddle), fuel + life pickups, dynamic curvature/road width, day/night, camera shake.
+- Systems: Score, fuel, combo, risk-based multiplier, hi-score, 3 lives.
 
-**Controls**
-- **Drag Steering:** Always enabled when control mode allows; independent of speed.
-- **Arrow Buttons:** 3× faster steering; ignored when `speed == 0`.
-- **Pause:** Top-left button toggles pause; pause overlay allows difficulty/control changes.
+**Recent Changes (current session)**
+- Lives: start with 3; lose on traffic/hazards/edge; Game Over at 0.
+- Timer removed: no countdown, no time bonuses/penalties.
+- HUD: top-left HI-SCORE + 3 car icons (cyan=remaining, dim=spent). Right panel shows Score, Fuel (bar), Speed (boxes + km/h). HUD stays bright at night.
+- Fuel: increased spawn; fuel bar color-coded (green/amber/red).
+- Pickups: Added extra-life pickup (green box with +). Spawns every 120s when lives < 3.
+- Road zero-speed: road scroll/curvature/width changes freeze; scene is still.
+- Post-game ambiance: stopped at Game Over → occasional overtake car passes from bottom upward; no scoring/collisions.
+- Progressive difficulty: every minute ramps AI/hazards and allows slimmer roads. First minute easier (fewer spawns, no slimming). Road min width can reach ~37% of screen. Object sizes remain constant via reference-width sizing.
+- Visuals: Dual headlight cones with glints; brighter red tail lights for all cars; player has white headlights + tail lights.
+- Menu: removed difficulty slider and controls selector; only Music and SFX checkboxes remain.
+- Music lifecycle: background chiptune stops on Game Over and restarts from beginning on new game.
 
-**Recent Changes (This Session)**
-- Lives system: start with 3 lives; decrement on traffic collisions, hazards, and road-edge impacts; Game Over at 0.
-- HUD: three car icons at top-left (cyan = remaining, dim = spent); numeric lives also listed.
-- Game Over behavior: decelerate gently to full stop; speedometer shows `0 KM/H` and can show 0 in all states.
-- Road at zero speed: stop scrolling; freeze curvature and width changes; scene is completely still at `speed == 0`.
-- Post-Game ambiance: while Game Over overlay is shown and speed is 0, occasionally spawn a car from the bottom that overtakes upward; normal traffic freezes; no scoring/collisions outside running.
-- Controls: on-screen arrow steering is 3× faster; ignored at zero speed.
+**Audio (current implementation)**
+- Engine: fully synthesized resonant-noise model (pulse train + two noise resonators) with smoothing; 2.0s loop length; 5ms loop fade; equal-power crossfade (~500ms) between RPM loops; volume follows speed.
+- Music: longer 32-bar chiptune loop; default volume halved; can be disabled via checkbox.
+- SFX: synthesized beeps/whoosh/screech/splash/crash/game-over; all file-backed (DeviceFileSource) for iOS compatibility.
+- iOS audio context set to Playback at startup (plays with mute switch on).
 
-**Files of Interest**
-- `lib/src/lemans/lemans_page.dart`: Game model, loop, rendering, input, audio, HUD, pause overlay.
-- `lib/src/menu/menu_page.dart`: Main menu with control mode and difficulty.
-- `lib/src/config.dart`: `GameConfig` (control mode, difficulty).
-- `lib/src/lemans/palette.dart`: C64-inspired palette.
+**Controls/UX**
+- On-screen arrows: larger invisible hit areas; graphics unchanged.
+- Menu: only checkboxes (Music, SFX). No pause UI in-game.
 
-**Build & Run**
-- Install Flutter (currently `Flutter 3.35.2`, Dart `3.9.0`).
-- Fetch deps: `cd RaceDriver && flutter pub get`.
-- iOS Simulator: `open -a Simulator` then `flutter devices` then run `flutter run -d "iPhone 16e"` (or pick your device).
-- Hot reload/restart: In your terminal, press `r`/`R`.
-- If Simulator app is already running from another session, terminate: `xcrun simctl terminate booted dk.johndoktor.racedriver`.
+**Technical Notes**
+- Constant object sizing: cars/hazards/pickups size from a captured reference road width; collisions/rendering use that base size.
+- Engine loops: cached per-RPM files; equal-power crossfade to avoid gaps; RPM update threshold tuned; per-frame volume updates; no restarts during steady play.
+- Remove clicks: loop fade window applied; longer loops reduce repetition.
 
-**Known Notes / Warnings**
-- `WillPopScope` is deprecated; consider migrating to `PopScope` for back behavior.
-- `flutter_native_splash` configured but not generated; run: `flutter pub run flutter_native_splash:create`.
-- Some dependencies have newer versions; upgrades optional.
+**Known Issues / Warnings**
+- WillPopScope is deprecated; consider migrating to PopScope.
+- Some dependencies have newer versions; optional upgrade.
 
-**Open Ideas / Next Steps**
-- Styling: refine life icons (size, outline, color) or position.
-- Day/Night: optionally freeze the cycle at `speed == 0` (currently continues).
-- Input: add keyboard arrow support for desktop/web targets; haptics on collisions.
-- Audio: upgrade `audioplayers`, add music or richer SFX.
-- UX: replace `WillPopScope` with `PopScope`; improve pause/menu flow.
-- Gameplay: nitro boost, checkpoints/laps, difficulty tiers, leaderboards.
-- Testing: expand beyond basic HUD smoke test.
+**Next Steps (suggested)**
+- Engine: optional filter sweep opening with speed; gear/RPM stepping if desired.
+- Audio toggles persistence: save Music/SFX checkboxes with SharedPreferences.
+- Input: optional keyboard/haptics for desktop/mobile.
+- Polish: migrate to PopScope; tune HUD/lighting.
 
-**Bundle Identifiers (iOS)**
+**Run Instructions**
+- `cd RaceDriver && flutter pub get`
+- iOS Simulator: `open -a Simulator`, `flutter devices`, then `flutter run -d <sim>`
+- If needed: terminate existing sim app: `xcrun simctl terminate booted dk.johndoktor.racedriver`
+
+**iOS Bundle IDs**
 - App: `dk.johndoktor.racedriver`
 - Dev: `dk.johndoktor.racedriver.dev`
 
-**Owner Notes**
-- Lives decrement events are guarded by state; scoring/pickups/collisions only apply in `running` state.
-- At Game Over + speed 0: only special overtake cars move from bottom to top.
-
-— End of status —
-
+Status last updated: committed engine smoothing (resonant-noise + crossfade), halved music volume, menu simplified. Continue by tuning engine tone/crossfade length or persisting audio settings.

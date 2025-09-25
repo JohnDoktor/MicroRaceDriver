@@ -15,6 +15,7 @@ class MenuPage extends StatefulWidget {
 class _MenuPageState extends State<MenuPage> with TickerProviderStateMixin {
   bool _musicEnabled = true;
   bool _sfxEnabled = true;
+  bool _lowGraphics = true;
   late final AnimationController _parallaxCtl;
   late final AnimationController _fadeCtl;
   late final Future<String?> _bgFuture;
@@ -102,7 +103,7 @@ class _MenuPageState extends State<MenuPage> with TickerProviderStateMixin {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Text('RaceDriver', style: TextStyle(fontFamily: 'VT323', fontSize: 48, color: Colors.white)),
+                  const Text('MicroRaceDriver', style: TextStyle(fontFamily: 'VT323', fontSize: 48, color: Colors.white)),
                   const SizedBox(height: 8),
               const Text('Le Mans style', style: TextStyle(fontFamily: 'VT323', fontSize: 20, color: Colors.white70)),
               const SizedBox(height: 32),
@@ -127,6 +128,7 @@ class _MenuPageState extends State<MenuPage> with TickerProviderStateMixin {
                   ],
                 ),
               ),
+              // Low Graphics forced on; option hidden for simplicity
               // Test sound button removed
               const SizedBox(height: 32),
               ElevatedButton(
@@ -135,6 +137,7 @@ class _MenuPageState extends State<MenuPage> with TickerProviderStateMixin {
                     builder: (_) => LeMansPage(config: GameConfig(
                       musicEnabled: _musicEnabled,
                       sfxEnabled: _sfxEnabled,
+                      lowGraphics: _lowGraphics,
                     )),
                   ));
                 },

@@ -126,7 +126,7 @@ class _Pickup {
 }
 
 class _GameTicker extends StatefulWidget {
-  final Widget Function(BuildContext, _GameModel, Rect) builder;
+  final Widget Function(BuildContext, _GameModel, CustomPainter) builder;
   const _GameTicker({required this.builder});
   @override
   State<_GameTicker> createState() => _GameTickerState();
@@ -140,6 +140,9 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
   static const double _speedFactor = 0.35; // Global pacing: slower overall
   final _EngineAudio _engine = _EngineAudio();
   final _Music _music = _Music();
+  final ValueNotifier<int> _repaint = ValueNotifier<int>(0);
+  late final _LeMansPainter _painter;
+  _GameState _lastState = _GameState.countdown;
 
   @override
   void initState() {
@@ -147,6 +150,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
     _ticker = createTicker(_onTick)..start();
     // Start background chiptune
     _music.start();
+    _painter = _LeMansPainter(model, _repaint);
   }
 
   void _reset() {
@@ -567,7 +571,13 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
     if (model.shake > 0) model.shake = math.max(0, model.shake - dt * 1.4);
     if (model.invuln > 0) model.invuln = math.max(0, model.invuln - dt);
 
-    setState(() {});
+    // Painter-driven repaint each frame
+    _repaint.value++;
+    // Only rebuild widget tree on state transitions (e.g., overlay changes)
+    if (model.state != _lastState) {
+      _lastState = model.state;
+      if (mounted) setState(() {});
+    }
   }
 
   Duration? _lastTime;
@@ -615,12 +625,14 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
         builder: (context, constraints) {
           final road = _roadRectForSize(Size(constraints.maxWidth, constraints.maxHeight));
           // Keep audio mixers in sync with config each frame
+          // Apply menu config; in low graphics, mute SFX/engine to avoid CPU spikes
           final mus = model.config.musicEnabled ? model.config.musicVolume : 0.0;
-          final sfx = model.config.sfxEnabled ? model.config.sfxVolume : 0.0;
+          final sfxBase = model.config.sfxEnabled ? model.config.sfxVolume : 0.0;
+          final sfx = model.config.lowGraphics ? 0.0 : sfxBase;
           _engine.master = sfx; // engine treated as SFX
           audio.sfxVolume = sfx;
           _music.setVolume(mus);
-          return widget.builder(context, model, road);
+          return widget.builder(context, model, _painter);
         },
       ),
     );
@@ -638,8 +650,18 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
 
 class _LeMansPainter extends CustomPainter {
   final _GameModel model;
-  final Rect road;
-  _LeMansPainter(this.model, this.road);
+  late Rect road;
+  final _HudTextCache _hud = _HudTextCache();
+  final TextStyle _hudWhite = const TextStyle(fontFamily: 'VT323', fontSize: 18, fontWeight: FontWeight.w700, color: Colors.white);
+  final TextStyle _hudGreen = const TextStyle(fontFamily: 'VT323', fontSize: 18, fontWeight: FontWeight.w700, color: Color(0xFF00FF00));
+  _LeMansPainter(this.model, Listenable repaint) : super(repaint: repaint);
+  Rect _roadRectForSize(Size s) {
+    final w = s.width * (model.roadWidthFactor);
+    final maxShift = s.width * 0.18;
+    final centerX = s.width * 0.5 + model.curveOffset.clamp(-1.0, 1.0) * maxShift;
+    final left = (centerX - w * 0.5).clamp(0.0, s.width - w);
+    return Rect.fromLTWH(left, 0, w, s.height);
+  }
 
   // Color utilities to simulate night dimming and simple alpha-less fade.
   int _r(Color c) => (c.r * 255.0).round() & 0xFF;
@@ -653,6 +675,7 @@ class _LeMansPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    road = _roadRectForSize(size);
     // Camera shake
     if (model.shake > 0) {
       final dx = (math.sin(model.scroll * 0.05) * 1.0) * (model.shake * 6);
@@ -753,8 +776,8 @@ class _LeMansPainter extends CustomPainter {
       }
     }
 
-    // Headlights mask at night
-    if (model.night > 0.4) {
+    // Headlights mask at night (skip in low graphics mode)
+    if (model.night > 0.4 && !model.config.lowGraphics) {
       final darkness = (model.night - 0.4) / 0.6; // 0..1
       _drawHeadlights(canvas, size, darkness);
       // Emissive tail lights so they visibly glow in the dark
@@ -766,13 +789,14 @@ class _LeMansPainter extends CustomPainter {
   }
 
   void _drawTailLightEmission(Canvas canvas) {
+    if (model.config.lowGraphics) return;
     // Extra emissive pass drawn after darkness to ensure visibility at night
     final n = ((model.night - 0.4) / 0.6).clamp(0.0, 1.0);
     if (n <= 0.0) return;
     final glow = Paint()
       ..blendMode = BlendMode.screen
       ..color = Color.fromARGB((160 + 80 * n).round(), 255, 70, 70)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 12);
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
     void drawFor(Rect r) {
       final tlW = r.width * 0.16;
       final tlH = r.height * 0.10;
@@ -896,14 +920,14 @@ class _LeMansPainter extends CustomPainter {
       final right = Rect.fromLTWH(r.right - r.width * 0.08 - tlW, y, tlW, tlH);
       final n = ((model.night - 0.35) / 0.65).clamp(0.0, 1.0);
       // During day: dim lens only; at night: bright core + local glow (also reinforced post-overlay)
-      if (n <= 0.0) {
+      if (n <= 0.0 || model.config.lowGraphics) {
         final lens = Paint()..color = const Color(0xFF7A2020);
         canvas.drawRect(left, lens);
         canvas.drawRect(right, lens);
       } else {
         final glow = Paint()
           ..color = Color.fromARGB((170 + 70 * n).round(), 255, 40, 40)
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
         final core = Paint()..color = const Color(0xFFFF4040);
         canvas.drawRect(left.inflate(3), glow);
         canvas.drawRect(right.inflate(3), glow);
@@ -920,7 +944,7 @@ class _LeMansPainter extends CustomPainter {
       final right = Rect.fromLTWH(r.right - r.width * 0.12 - hlW, y, hlW, hlH);
       final glow = Paint()
         ..color = const Color.fromARGB(140, 255, 255, 255)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
+        ..maskFilter = model.config.lowGraphics ? null : const MaskFilter.blur(BlurStyle.normal, 4);
       final core = Paint()..color = const Color(0xFFFFFFFF);
       canvas.drawRect(left.inflate(2), glow);
       canvas.drawRect(right.inflate(2), glow);
@@ -936,21 +960,16 @@ class _LeMansPainter extends CustomPainter {
     final right = size.width - 14.0;
     final x = right - 120.0;
     final top = 16.0;
-    double text(String t, Color c, double yy) {
-      final tp = TextPainter(
-        text: TextSpan(
-          text: t,
-          style: TextStyle(fontFamily: 'VT323', fontSize: 18, fontWeight: FontWeight.w700, color: c),
-        ),
-        textDirection: TextDirection.ltr,
-      )..layout(maxWidth: 120);
+    double drawText(String t, TextStyle style, double yy) {
+      final tp = _hud.tp(t, style, maxWidth: 120);
       tp.paint(canvas, Offset(x, yy));
       return tp.height;
     }
+    final styleWhite = _hudWhite;
     double y = top;
-    y += text('SCORE  ${model.score}', C64Palette.white, y) + 10;
+    y += drawText('SCORE  ${model.score}', styleWhite, y) + 10;
     // Fuel bar
-    y += text('FUEL', C64Palette.white, y) + 6;
+    y += drawText('FUEL', styleWhite, y) + 6;
     final barW = 110.0, barH = 12.0;
     final pct = (model.fuel.clamp(0, 100)) / 100.0;
     final bg = Paint()..color = C64Palette.darkGray;
@@ -967,7 +986,7 @@ class _LeMansPainter extends CustomPainter {
     canvas.drawRRect(RRect.fromRectAndRadius(barRect, const Radius.circular(3)), bg);
     canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(x, y, barW * pct, barH), const Radius.circular(3)), fg);
     y += barH + 10;
-    y += text('SPEED', C64Palette.white, y) + 4;
+    y += drawText('SPEED', styleWhite, y) + 4;
     // speed meter boxes (3)
     final boxes = 3;
     final w = 26.0, h = 16.0, gap = 6.0;
@@ -977,25 +996,16 @@ class _LeMansPainter extends CustomPainter {
           Rect.fromLTWH(x + i * (w + gap), y, w, h), const Radius.circular(2));
       final Color col = i < filled
           ? C64Palette.cyan
-          : C64Palette.cyan.withValues(alpha: 0.15);
+          : C64Palette.cyan.withOpacity(0.15);
       canvas.drawRRect(r, Paint()..color = col);
     }
     // Show 0 KM/H regardless of state
     final kmh = (model.speed * 120).round();
-    text('   $kmh KM/H', C64Palette.white, y + h + 6);
+    drawText('   $kmh KM/H', styleWhite, y + h + 6);
 
     if (model.state == _GameState.gameOver) {
       final overlay = Paint()..color = const Color.fromARGB(140, 0, 0, 0);
       canvas.drawRect(Offset.zero & size, overlay);
-      final tp = TextPainter(
-        text: const TextSpan(
-          text: ' ',
-          style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w800),
-        ),
-        textAlign: TextAlign.center,
-        textDirection: TextDirection.ltr,
-      )..layout(maxWidth: size.width * 0.8);
-      tp.paint(canvas, Offset((size.width - tp.width) / 2, (size.height - tp.height) / 2));
     }
     // Hazard/traffic warnings: small arrows if something is close ahead
     _drawWarnings(canvas, size);
@@ -1005,14 +1015,8 @@ class _LeMansPainter extends CustomPainter {
     // Hi-Score text
     final leftX = 14.0;
     final topY = 16.0;
-    final tp = TextPainter(
-      text: TextSpan(
-        text: 'HI-SCORE  ${model.hiScore}',
-        style: const TextStyle(fontFamily: 'VT323', fontSize: 18, fontWeight: FontWeight.w700, color: C64Palette.green),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout(maxWidth: size.width * 0.5);
-    tp.paint(canvas, Offset(leftX, topY));
+    final hi = _hud.tp('HI-SCORE  ${model.hiScore}', const TextStyle(fontFamily: 'VT323', fontSize: 18, fontWeight: FontWeight.w700, color: C64Palette.green), maxWidth: size.width * 0.5);
+    hi.paint(canvas, Offset(leftX, topY));
     // Lives (top-left) — three car icons like old arcade machines
     _drawLives(canvas, size);
   }
@@ -1033,7 +1037,7 @@ class _LeMansPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _LeMansPainter oldDelegate) => true;
+  bool shouldRepaint(covariant _LeMansPainter oldDelegate) => false;
 
   void _drawHeadlights(Canvas canvas, Size size, double intensity) {
     // Dark overlay layer, then cut out two soft cones using dstOut
@@ -1076,33 +1080,35 @@ class _LeMansPainter extends CustomPainter {
 
     canvas.restore();
 
-    // Subtle light glints on objects within the cones
-    final combined = Path()..addPath(leftCone, Offset.zero)..addPath(rightCone, Offset.zero);
-    canvas.save();
-    canvas.clipPath(combined);
-    final glint = Paint()
-      ..blendMode = BlendMode.screen
-      ..color = const Color.fromARGB(80, 255, 255, 255);
-    // Traffic highlights
-    for (final c in model.traffic) {
-      final r = c.toRect(road, baseW);
-      // small highlight on top surface
-      final cap = Rect.fromLTWH(r.left + r.width * 0.15, r.top + r.height * 0.08, r.width * 0.7, r.height * 0.12);
-      canvas.drawRRect(RRect.fromRectAndRadius(cap, const Radius.circular(2)), glint);
+    // Subtle light glints on objects within the cones (skipped in low graphics)
+    if (!model.config.lowGraphics) {
+      final combined = Path()..addPath(leftCone, Offset.zero)..addPath(rightCone, Offset.zero);
+      canvas.save();
+      canvas.clipPath(combined);
+      final glint = Paint()
+        ..blendMode = BlendMode.screen
+        ..color = const Color.fromARGB(80, 255, 255, 255);
+      // Traffic highlights
+      for (final c in model.traffic) {
+        final r = c.toRect(road, baseW);
+        // small highlight on top surface
+        final cap = Rect.fromLTWH(r.left + r.width * 0.15, r.top + r.height * 0.08, r.width * 0.7, r.height * 0.12);
+        canvas.drawRRect(RRect.fromRectAndRadius(cap, const Radius.circular(2)), glint);
+      }
+      // Hazards
+      for (final h in model.hazards) {
+        final r = h.toRect(road, baseW);
+        final cap = Rect.fromCenter(center: r.center.translate(0, -r.height * 0.15), width: r.width * 0.9, height: r.height * 0.4);
+        canvas.drawOval(cap, glint);
+      }
+      // Pickups
+      for (final pck in model.pickups) {
+        final r = pck.toRect(road, baseW);
+        final cap = Rect.fromCenter(center: r.center.translate(0, -r.height * 0.1), width: r.width * 0.8, height: r.height * 0.3);
+        canvas.drawOval(cap, glint);
+      }
+      canvas.restore();
     }
-    // Hazards
-    for (final h in model.hazards) {
-      final r = h.toRect(road, baseW);
-      final cap = Rect.fromCenter(center: r.center.translate(0, -r.height * 0.15), width: r.width * 0.9, height: r.height * 0.4);
-      canvas.drawOval(cap, glint);
-    }
-    // Pickups
-    for (final pck in model.pickups) {
-      final r = pck.toRect(road, baseW);
-      final cap = Rect.fromCenter(center: r.center.translate(0, -r.height * 0.1), width: r.width * 0.8, height: r.height * 0.3);
-      canvas.drawOval(cap, glint);
-    }
-    canvas.restore();
   }
 
   void _drawWarnings(Canvas canvas, Size size) {
@@ -1150,6 +1156,7 @@ class _Audio {
   final AudioPlayer _player = AudioPlayer()..setPlayerMode(PlayerMode.lowLatency);
   double sfxVolume = 1.0; // master SFX volume 0..1
   Future<void> beep(int freq, int ms) async {
+    if (sfxVolume <= 0) return;
     try {
       final bytes = _sineWavBytes(freq: freq, ms: ms, vol: 0.7 * sfxVolume);
       final path = await _writeTempWav(bytes, prefix: 'beep');
@@ -1158,6 +1165,7 @@ class _Audio {
   }
 
   Future<void> whoosh() async {
+    if (sfxVolume <= 0) return;
     try {
       final p = AudioPlayer()..setPlayerMode(PlayerMode.lowLatency);
       final p1 = await _writeTempWav(_sineWavBytes(freq: 700, ms: 40, vol: 0.6 * sfxVolume), prefix: 'wh1');
@@ -1174,6 +1182,7 @@ class _Audio {
   // New synthesized effects
   Future<void> screech() async {
     // short rising tone + noise burst
+    if (sfxVolume <= 0) return;
     try {
       final p = AudioPlayer()..setPlayerMode(PlayerMode.lowLatency);
       final s1 = await _writeTempWav(_sineWavBytes(freq: 1200, ms: 60, vol: 0.5 * sfxVolume), prefix: 'scr');
@@ -1188,6 +1197,7 @@ class _Audio {
 
   Future<void> splash() async {
     // short filtered noise burst
+    if (sfxVolume <= 0) return;
     try {
       final p = AudioPlayer()..setPlayerMode(PlayerMode.lowLatency);
       final s = await _writeTempWav(_noiseWavBytes(ms: 120, vol: 0.45 * sfxVolume), prefix: 'spl');
@@ -1200,6 +1210,7 @@ class _Audio {
 
   Future<void> crash() async {
     // thud (low sine) + noise
+    if (sfxVolume <= 0) return;
     try {
       final p = AudioPlayer()..setPlayerMode(PlayerMode.lowLatency);
       final s1 = await _writeTempWav(_sineWavBytes(freq: 180, ms: 120, vol: 0.95 * sfxVolume), prefix: 'cr1');
@@ -1213,6 +1224,7 @@ class _Audio {
   }
 
   Future<void> gameOver() async {
+    if (sfxVolume <= 0) return;
     try {
       final p = AudioPlayer()..setPlayerMode(PlayerMode.lowLatency);
       final a = await _writeTempWav(_sineWavBytes(freq: 660, ms: 120, vol: 0.5 * sfxVolume), prefix: 'go1');
@@ -1229,6 +1241,22 @@ class _Audio {
 
   void dispose() {
     _player.dispose();
+  }
+}
+
+class _HudTextCache {
+  final Map<String, TextPainter> _cache = {};
+  TextPainter tp(String text, TextStyle style, {double? maxWidth}) {
+    final key = '${style.hashCode}|$text|${maxWidth?.toStringAsFixed(1) ?? ''}';
+    final existing = _cache[key];
+    if (existing != null) return existing;
+    final tp = TextPainter(
+      text: TextSpan(text: text, style: style),
+      textDirection: TextDirection.ltr,
+    );
+    tp.layout(maxWidth: maxWidth ?? double.infinity);
+    _cache[key] = tp;
+    return tp;
   }
 }
 
@@ -1370,6 +1398,11 @@ class _EngineAudio {
   AudioPlayer get _next => _usingA ? _b : _a;
 
   Future<void> update(double speed) async {
+    if (master <= 0) {
+      // Stop engine completely when muted to save CPU
+      await stop();
+      return;
+    }
     final freq = (140 + speed * 320).round();
     final targetVol = (0.02 + speed * 0.06) * master; // further reduced engine loudness
     if (!_started) {
@@ -1684,13 +1717,15 @@ class LeMansPage extends StatelessWidget {
       backgroundColor: C64Palette.black,
       body: SafeArea(
         child: _GameTicker(
-          builder: (context, model, road) {
+          builder: (context, model, painter) {
             model.config = config;
             return Stack(
               children: [
                 Positioned.fill(
-                  child: CustomPaint(
-                    painter: _LeMansPainter(model, road),
+                  child: RepaintBoundary(
+                    child: CustomPaint(
+                      painter: painter,
+                    ),
                   ),
                 ),
                 if (model.state == _GameState.gameOver) Positioned.fill(

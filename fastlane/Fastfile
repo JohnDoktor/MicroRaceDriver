@@ -1,20 +1,67 @@
 default_platform(:ios)
 
 platform :ios do
-  desc "Build IPA for App Store"
+  desc "Build IPA for App Store via Flutter"
   lane :build do
-    gym(
-      scheme: "Runner",
-      export_method: "app-store",
-      clean: true,
-      silent: true
-    )
+    # Run CocoaPods/Flutter outside Bundler to avoid Ruby version conflicts
+    require 'bundler'
+    Bundler.with_unbundled_env do
+      # Ensure Homebrew's pod takes precedence
+      ENV['PATH'] = "/opt/homebrew/bin:/usr/local/bin:#{ENV['PATH']}"
+
+      # Always run from repo root (Fastfile lives in fastlane/)
+      repo_root = File.expand_path('..', __dir__)
+      Dir.chdir(repo_root) do
+        sh("which", "pod")
+        sh("pod", "--version")
+        sh("bash", "-lc", "cd ios && pod install")
+
+        sh("flutter", "clean")
+        sh("flutter", "pub", "get")
+        sh("flutter", "build", "ipa", "--release")
+      end
+    end
   end
 
   desc "Upload build to TestFlight/App Store Connect"
   lane :upload do
-    api_key_path("fastlane/api_key.json") # place your API key here (not committed)
+    require 'json'
+    repo_root = File.expand_path('..', __dir__)
+
+    # Load App Store Connect API key (fastlane JSON format)
+    api_key_json_path = File.join(repo_root, 'fastlane', 'api_key.json')
+    UI.user_error!("Missing API key at #{api_key_json_path}") unless File.exist?(api_key_json_path)
+    api_key_data = JSON.parse(File.read(api_key_json_path))
+    api_key = app_store_connect_api_key(
+      key_id: api_key_data['key_id'],
+      issuer_id: api_key_data['issuer_id'],
+      key_content: api_key_data['key'],
+      is_key_content_base64: false,
+      in_house: api_key_data['in_house'] || false
+    )
+
+    # Create the app in ASC if missing (ignore error if it already exists)
+    begin
+      produce(
+        app_identifier: "dk.johndoktor.racedriver",
+        app_name: "RaceDriver",
+        sku: "racedriver-ios",
+        platform: 'ios'
+      )
+    rescue => e
+      UI.message("produce skipped or app already exists: #{e.message}")
+    end
+
+    # Pick the built IPA dynamically (Flutter may name it after the package)
+    ipa_dir = File.join(repo_root, 'build/ios/ipa')
+    ipa_path = Dir[File.join(ipa_dir, '*.ipa')].first
+    UI.user_error!("Could not find any .ipa in #{ipa_dir}") unless ipa_path && File.exist?(ipa_path)
+
     pilot(
+      api_key: api_key,
+      ipa: ipa_path,
+      app_identifier: "dk.johndoktor.racedriver",
+      app_platform: "ios",
       skip_submission: true,
       skip_waiting_for_build_processing: false
     )
@@ -22,12 +69,96 @@ platform :ios do
 
   desc "Upload metadata only (no binary)"
   lane :deliver_metadata do
-    api_key_path("fastlane/api_key.json")
     deliver(
+      api_key_path: "fastlane/api_key.json",
       skip_screenshots: true,
       skip_binary_upload: true,
-      submit_for_review: false
+      submit_for_review: false,
+      force: true
     )
+  end
+
+  desc "Set promotional text only (no other metadata)"
+  lane :set_promotional_text do
+    require 'json'
+    repo_root = File.expand_path('..', __dir__)
+
+    text_path = File.join(repo_root, 'fastlane', 'metadata', 'en-US', 'promotional_text.txt')
+    UI.user_error!("Missing promotional text at #{text_path}") unless File.exist?(text_path)
+    promo_text = File.read(text_path).strip
+    UI.user_error!("Promotional text must be <= 170 characters") if promo_text.length > 170
+
+    api_key_json_path = File.join(repo_root, 'fastlane', 'api_key.json')
+    UI.user_error!("Missing API key at #{api_key_json_path}") unless File.exist?(api_key_json_path)
+    api_key_data = JSON.parse(File.read(api_key_json_path))
+    app_store_connect_api_key(
+      key_id: api_key_data['key_id'],
+      issuer_id: api_key_data['issuer_id'],
+      key_content: api_key_data['key'],
+      is_key_content_base64: false,
+      in_house: api_key_data['in_house'] || false
+    )
+
+    require 'spaceship'
+    app = Spaceship::ConnectAPI::App.find("dk.johndoktor.racedriver")
+    UI.user_error!("App not found in App Store Connect") unless app
+
+    version = app.get_edit_app_store_version
+    version ||= app.get_latest_app_store_version
+    UI.user_error!("No App Store version found to edit") unless version
+
+    localizations = version.get_app_store_version_localizations
+    loc = localizations.find { |l| l.locale == 'en-US' }
+
+    if loc.nil?
+      UI.message("Creating en-US version localization with promotional text...")
+      version.create_app_store_version_localization(attributes: { locale: 'en-US', promotionalText: promo_text })
+    else
+      UI.message("Updating promotional text for en-US...")
+      loc.update(attributes: { promotionalText: promo_text })
+    end
+  end
+
+  desc "Set app info localization (name, subtitle)"
+  lane :set_app_info do
+    require 'json'
+    repo_root = File.expand_path('..', __dir__)
+
+    name_path = File.join(repo_root, 'fastlane', 'metadata', 'en-US', 'name.txt')
+    subtitle_path = File.join(repo_root, 'fastlane', 'metadata', 'en-US', 'subtitle.txt')
+    UI.user_error!("Missing name at #{name_path}") unless File.exist?(name_path)
+    UI.user_error!("Missing subtitle at #{subtitle_path}") unless File.exist?(subtitle_path)
+    name = File.read(name_path).strip
+    subtitle = File.read(subtitle_path).strip
+    UI.user_error!("Subtitle must be <= 30 chars") if subtitle.length > 30
+
+    api_key_json_path = File.join(repo_root, 'fastlane', 'api_key.json')
+    UI.user_error!("Missing API key at #{api_key_json_path}") unless File.exist?(api_key_json_path)
+    api_key_data = JSON.parse(File.read(api_key_json_path))
+    app_store_connect_api_key(
+      key_id: api_key_data['key_id'],
+      issuer_id: api_key_data['issuer_id'],
+      key_content: api_key_data['key'],
+      is_key_content_base64: false,
+      in_house: api_key_data['in_house'] || false
+    )
+
+    require 'spaceship'
+    app = Spaceship::ConnectAPI::App.find("dk.johndoktor.racedriver")
+    UI.user_error!("App not found in App Store Connect") unless app
+
+    app_info = app.fetch_latest_app_info || app.fetch_edit_app_info
+    UI.user_error!("App info not found") unless app_info
+    localizations = app_info.get_app_info_localizations
+    loc = localizations.find { |l| l.locale == 'en-US' }
+
+    if loc.nil?
+      UI.message("Creating en-US app info localization with name/subtitle...")
+      app_info.create_app_info_localization(attributes: { locale: 'en-US', name: name, subtitle: subtitle })
+    else
+      UI.message("Updating name/subtitle for en-US app info...")
+      loc.update(attributes: { name: name, subtitle: subtitle })
+    end
   end
 
   desc "Build and upload"
@@ -35,5 +166,71 @@ platform :ios do
     build
     upload
   end
-end
 
+  desc "Build and distribute to TestFlight group, notify testers"
+  lane :beta do
+    build
+
+    require 'json'
+    repo_root = File.expand_path('..', __dir__)
+    api_key_json_path = File.join(repo_root, 'fastlane', 'api_key.json')
+    UI.user_error!("Missing API key at #{api_key_json_path}") unless File.exist?(api_key_json_path)
+    api_key_data = JSON.parse(File.read(api_key_json_path))
+    app_store_connect_api_key(
+      key_id: api_key_data['key_id'],
+      issuer_id: api_key_data['issuer_id'],
+      key_content: api_key_data['key'],
+      is_key_content_base64: false,
+      in_house: api_key_data['in_house'] || false
+    )
+
+    group_name = "External Testers"
+    require 'spaceship'
+    app = Spaceship::ConnectAPI::App.find("dk.johndoktor.racedriver")
+    UI.user_error!("App not found in App Store Connect") unless app
+    groups = app.get_beta_groups
+    group = groups.find { |g| g.name == group_name }
+    if group.nil?
+      UI.message("Creating TestFlight group '#{group_name}'...")
+      group = app.create_beta_group(group_name: group_name, is_internal_group: false, has_access_to_all_builds: true)
+    end
+
+    # Upload and distribute to external testers
+    repo_root = File.expand_path('..', __dir__)
+    ipa_dir = File.join(repo_root, 'build/ios/ipa')
+    ipa_path = Dir[File.join(ipa_dir, '*.ipa')].first
+    UI.user_error!("Could not find any .ipa in #{ipa_dir}") unless ipa_path && File.exist?(ipa_path)
+
+    # Beta review metadata
+    beta_desc_path = File.join(repo_root, 'fastlane', 'metadata', 'en-US', 'beta_app_description.txt')
+    beta_description = if File.exist?(beta_desc_path)
+      File.read(beta_desc_path).strip
+    else
+      # fallback to promotional text or description
+      promo = File.join(repo_root, 'fastlane', 'metadata', 'en-US', 'promotional_text.txt')
+      descf = File.join(repo_root, 'fastlane', 'metadata', 'en-US', 'description.txt')
+      if File.exist?(promo)
+        File.read(promo).strip
+      elsif File.exist?(descf)
+        File.read(descf)[0, 400].strip
+      else
+        'Beta build of MicroRaceDriver with performance improvements.'
+      end
+    end
+    beta_feedback_email = ENV['BETA_FEEDBACK_EMAIL'] || UI.user_error!("Set BETA_FEEDBACK_EMAIL with a valid contact email for TestFlight beta.")
+
+    pilot(
+      api_key_path: "fastlane/api_key.json",
+      ipa: ipa_path,
+      app_identifier: "dk.johndoktor.racedriver",
+      app_platform: "ios",
+      distribute_external: true,
+      groups: [group_name],
+      notify_external_testers: true,
+      changelog: File.exist?(File.join(repo_root, 'fastlane', 'metadata', 'en-US', 'release_notes.txt')) ? File.read(File.join(repo_root, 'fastlane', 'metadata', 'en-US', 'release_notes.txt')).strip : "Performance optimizations, improved stability, and new app icon/splash.",
+      beta_app_description: beta_description,
+      beta_app_feedback_email: beta_feedback_email,
+      skip_waiting_for_build_processing: false
+    )
+  end
+end
