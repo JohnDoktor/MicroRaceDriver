@@ -1345,30 +1345,79 @@ Uint8List _engineWavBytes({required int freq, required int ms}) {
 }
 
 class _EngineAudio {
-  final AudioPlayer _p = AudioPlayer();
-  int _lastFreq = 0;
+  final AudioPlayer _a = AudioPlayer();
+  final AudioPlayer _b = AudioPlayer();
+  bool _usingA = true;
   bool _started = false;
+  bool _xfading = false;
+  int _lastFreq = 0;
+  double _currentVol = 0.0;
   double master = 1.0;
   final Map<int, String> _cache = {};
+  AudioPlayer get _curr => _usingA ? _a : _b;
+  AudioPlayer get _next => _usingA ? _b : _a;
+
   Future<void> update(double speed) async {
     final freq = (140 + speed * 320).round();
-    final vol = (0.05 + speed * 0.15) * master; // turned down overall
+    final targetVol = (0.05 + speed * 0.15) * master; // lowered overall
     if (!_started) {
       final path = await _pathForFreq(freq);
-      await _p.setReleaseMode(ReleaseMode.loop);
-      await _p.play(DeviceFileSource(path));
+      await _a.setReleaseMode(ReleaseMode.loop);
+      await _a.setVolume(targetVol.clamp(0.0, 1.0));
+      await _a.setPlaybackRate(1.0);
+      await _a.play(DeviceFileSource(path));
+      _usingA = true;
       _started = true;
       _lastFreq = freq;
-    } else if ((freq - _lastFreq).abs() > 60) {
-      // Refresh loop with new pitch occasionally to avoid choppiness
+      _currentVol = targetVol;
+      return;
+    }
+    final df = (freq - _lastFreq).abs();
+    // Small adjustments: use playback rate warping to avoid restart
+    if (df <= 10 && !_xfading) {
+      final ratio = (freq / (_lastFreq == 0 ? freq.toDouble() : _lastFreq.toDouble())).clamp(0.85, 1.2);
+      await _curr.setPlaybackRate(ratio);
+      await _curr.setVolume(targetVol.clamp(0.0, 1.0));
+      _currentVol = targetVol;
+      return;
+    }
+    if (df > 10 && !_xfading) {
+      // Crossfade to new loop to avoid gaps
       final path = await _pathForFreq(freq);
-      await _p.stop();
-      await _p.play(DeviceFileSource(path));
+      final from = _curr;
+      final to = _next;
+      await to.setReleaseMode(ReleaseMode.loop);
+      await to.setVolume(0.0);
+      await to.setPlaybackRate(1.0);
+      await to.play(DeviceFileSource(path));
+      _xfading = true;
+      const steps = 15; // longer, smoother crossfade
+      const stepMs = 20;
+      for (int i = 1; i <= steps; i++) {
+        final t = i / steps;
+        // equal-power crossfade
+        final toVol = (targetVol * math.sin(t * math.pi / 2)).clamp(0.0, 1.0);
+        final fromVol = (_currentVol * math.cos(t * math.pi / 2)).clamp(0.0, 1.0);
+        await to.setVolume(toVol);
+        await from.setVolume(fromVol);
+        await Future.delayed(const Duration(milliseconds: stepMs));
+      }
+      await from.stop();
+      await to.setPlaybackRate(1.0);
+      _usingA = !_usingA;
       _lastFreq = freq;
-    } else {
-      await _p.setVolume(vol.clamp(0.0, 1.0));
+      _currentVol = targetVol;
+      _xfading = false;
+      return;
+    }
+    // Regular volume tracking when not crossfading
+    if (!_xfading) {
+      final p = _usingA ? _a : _b;
+      await p.setVolume(targetVol.clamp(0.0, 1.0));
+      _currentVol = targetVol;
     }
   }
+
   Future<String> _pathForFreq(int freq) async {
     if (_cache.containsKey(freq)) return _cache[freq]!;
     final bytes = _engineWavBytes(freq: freq, ms: 1000);
@@ -1376,7 +1425,11 @@ class _EngineAudio {
     _cache[freq] = path;
     return path;
   }
-  void dispose() { _p.dispose(); }
+
+  void dispose() {
+    _a.dispose();
+    _b.dispose();
+  }
 }
 
 class _Music {
