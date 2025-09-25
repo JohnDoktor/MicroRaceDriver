@@ -22,10 +22,11 @@ class _Car {
   bool overtake = false; // special flag for post-game occasional passers
   double speedScale = 0.7; // relative to ground flow for AI cars
   _Car(this.x, this.y, this.w, this.h);
-  Rect toRect(Rect road) {
+  Rect toRect(Rect road, double baseWidth) {
     final cx = road.center.dx + x * (road.width * _kLaneXFactor);
-    final hPx = h * road.width; // size relative to road width for stability
-    final wPx = w * road.width;
+    final widthRef = baseWidth <= 0 ? road.width : baseWidth;
+    final hPx = h * widthRef;
+    final wPx = w * widthRef;
     final bottom = road.bottom - y * road.height;
     return Rect.fromCenter(center: Offset(cx, bottom - hPx * 0.5), width: wPx, height: hPx);
   }
@@ -77,6 +78,8 @@ class _GameModel {
   double roadWidthChangeTimer = 3.0;
   // Post-game occasional overtake timer
   double overtakeCooldown = 0.0;
+  // Reference road width (pixels) for stable object sizing
+  double refRoadWidth = 0.0;
 }
 
 class _Skid {
@@ -92,9 +95,10 @@ class _Hazard {
   double x; // -1..1
   double y; // 0..1 from bottom to top
   _Hazard(this.type, this.x, this.y);
-  Rect toRect(Rect road) {
+  Rect toRect(Rect road, double baseWidth) {
     final cx = road.center.dx + x * (road.width * _kLaneXFactor);
-    final s = road.width * 0.10;
+    final widthRef = baseWidth <= 0 ? road.width : baseWidth;
+    final s = widthRef * 0.10;
     final bottom = road.bottom - y * road.height;
     return Rect.fromCenter(center: Offset(cx, bottom - s * 0.5), width: s, height: s * 0.65);
   }
@@ -105,9 +109,10 @@ class _Pickup {
   double x; // -1..1
   double y; // 0..1 from bottom to top
   _Pickup(this.type, this.x, this.y);
-  Rect toRect(Rect road) {
+  Rect toRect(Rect road, double baseWidth) {
     final cx = road.center.dx + x * (road.width * _kLaneXFactor);
-    final s = road.width * 0.1;
+    final widthRef = baseWidth <= 0 ? road.width : baseWidth;
+    final s = widthRef * 0.1;
     final bottom = road.bottom - y * road.height;
     return Rect.fromCenter(center: Offset(cx, bottom - s * 0.5), width: s, height: s);
   }
@@ -154,6 +159,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
     model.roadWidthTarget = 0.86;
     model.roadWidthChangeTimer = 3.0;
     model.overtakeCooldown = 0.0;
+    model.refRoadWidth = 0.0;
   }
 
   void _onTick(Duration elapsed) {
@@ -170,6 +176,9 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
 
     // Calculate road rect once per frame (needed for pixel-based scroll pacing)
     Rect road = _roadRectForSize(Size(size.width, size.height));
+    if (model.refRoadWidth <= 0) {
+      model.refRoadWidth = road.width;
+    }
 
     // Simulate
     switch (model.state) {
@@ -395,7 +404,8 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
     _clampPlayer();
 
     // Collisions (only while running)
-    final pRect = model.player.toRect(road);
+    final baseW = model.refRoadWidth > 0 ? model.refRoadWidth : road.width;
+    final pRect = model.player.toRect(road, baseW);
     // Hazards and pickups move with the ground speed (same as road flow)
     final groundFlow = (2.8 * model.speed) * _speedFactor;
     for (final h in model.hazards) {
@@ -409,7 +419,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
 
     if (model.state == _GameState.running) {
       for (final h in model.hazards) {
-        if (model.invuln <= 0 && h.toRect(road).deflate(road.width * 0.02).overlaps(pRect.deflate(road.width * 0.02))) {
+      if (model.invuln <= 0 && h.toRect(road, baseW).deflate(baseW * 0.02).overlaps(pRect.deflate(baseW * 0.02))) {
           if (h.type == _HazardType.oil) {
             // brief slip effect
             model.player.x += (rng.nextDouble() - 0.5) * 0.3;
@@ -417,7 +427,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
             audio.beep(220, 90);
             model.shake = 0.2;
             // Drop quick skid marks at tires
-            final pr = model.player.toRect(road);
+          final pr = model.player.toRect(road, baseW);
             final l = Offset(pr.left + pr.width*0.05, pr.bottom - pr.height*0.2);
             final r = Offset(pr.right - pr.width*0.05, pr.bottom - pr.height*0.2);
             model.skids.add(_Skid(l.translate(-6, -2), l.translate(6, 2), 0.6));
@@ -438,8 +448,8 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
           }
         }
       }
-      for (final p in model.pickups) {
-        if (p.toRect(road).overlaps(pRect)) {
+    for (final p in model.pickups) {
+      if (p.toRect(road, baseW).overlaps(pRect)) {
           switch (p.type) {
             case _PickupType.fuel:
               model.fuel = math.min(100.0, model.fuel + 25);
@@ -452,8 +462,8 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
         }
       }
       model.pickups.removeWhere((p) => p.y < 0);
-      for (final car in model.traffic) {
-        if (model.invuln <= 0 && car.toRect(road).deflate(road.width * 0.02).overlaps(pRect.deflate(road.width * 0.02))) {
+    for (final car in model.traffic) {
+      if (model.invuln <= 0 && car.toRect(road, baseW).deflate(baseW * 0.02).overlaps(pRect.deflate(baseW * 0.02))) {
         // Simple collision penalty
         model.speed = 0.2;
         model.timeLeft = math.max(0, model.timeLeft - 3.0);
@@ -624,9 +634,10 @@ class _LeMansPainter extends CustomPainter {
       _drawStartLights(canvas);
     }
 
+    final baseW = model.refRoadWidth > 0 ? model.refRoadWidth : road.width;
     // Hazards
     for (final h in model.hazards) {
-      final r = h.toRect(road);
+      final r = h.toRect(road, baseW);
       switch (h.type) {
         case _HazardType.oil:
           final p = Paint()..color = const Color(0xFF101010);
@@ -641,7 +652,7 @@ class _LeMansPainter extends CustomPainter {
 
     // Pickups
     for (final p in model.pickups) {
-      final r = p.toRect(road);
+      final r = p.toRect(road, baseW);
       switch (p.type) {
         case _PickupType.fuel:
           final paint = Paint()..color = const Color(0xFFFFD54F);
@@ -655,17 +666,17 @@ class _LeMansPainter extends CustomPainter {
 
     // Traffic
     for (final c in model.traffic) {
-      _drawCar(canvas, c.toRect(road), body: _dim(const Color(0xFFDDDDDD)), tailLights: true);
+      _drawCar(canvas, c.toRect(road, baseW), body: _dim(const Color(0xFFDDDDDD)), tailLights: true);
     }
 
     // Player car
     // Player car (flash when invulnerable)
     final pBody = _dim(const Color(0xFF7EB7FF));
-    _drawCar(canvas, model.player.toRect(road), body: pBody, tailLights: true, headLights: true);
+    _drawCar(canvas, model.player.toRect(road, baseW), body: pBody, tailLights: true, headLights: true);
     if (model.invuln > 0) {
       final flash = (math.sin(model.scroll * 0.1) > 0) ? 160 : 0;
       if (flash > 0) {
-        _drawCar(canvas, model.player.toRect(road), body: Color.fromARGB(flash, 255, 255, 255));
+        _drawCar(canvas, model.player.toRect(road, baseW), body: Color.fromARGB(flash, 255, 255, 255));
       }
     }
 
@@ -699,11 +710,12 @@ class _LeMansPainter extends CustomPainter {
       canvas.drawRect(right.inflate(5), glow);
     }
     // Traffic
+    final baseW2 = model.refRoadWidth > 0 ? model.refRoadWidth : road.width;
     for (final c in model.traffic) {
-      drawFor(c.toRect(road));
+      drawFor(c.toRect(road, baseW2));
     }
     // Player
-    drawFor(model.player.toRect(road));
+    drawFor(model.player.toRect(road, baseW2));
   }
 
   void _drawHatch(Canvas canvas, Rect r) {
@@ -925,7 +937,8 @@ class _LeMansPainter extends CustomPainter {
     final overlayAlpha = (220 * intensity).round().clamp(0, 255); // stronger darkness
     canvas.drawRect(Offset.zero & size, Paint()..color = Color.fromARGB(overlayAlpha, 0, 0, 0));
 
-    final car = model.player.toRect(road);
+    final baseW = model.refRoadWidth > 0 ? model.refRoadWidth : road.width;
+    final car = model.player.toRect(road, baseW);
     final frontY = car.top + car.height * 0.1;
     final leftOrigin = Offset(car.left + car.width * 0.28, frontY);
     final rightOrigin = Offset(car.right - car.width * 0.28, frontY);
@@ -968,20 +981,20 @@ class _LeMansPainter extends CustomPainter {
       ..color = const Color.fromARGB(80, 255, 255, 255);
     // Traffic highlights
     for (final c in model.traffic) {
-      final r = c.toRect(road);
+      final r = c.toRect(road, baseW);
       // small highlight on top surface
       final cap = Rect.fromLTWH(r.left + r.width * 0.15, r.top + r.height * 0.08, r.width * 0.7, r.height * 0.12);
       canvas.drawRRect(RRect.fromRectAndRadius(cap, const Radius.circular(2)), glint);
     }
     // Hazards
     for (final h in model.hazards) {
-      final r = h.toRect(road);
+      final r = h.toRect(road, baseW);
       final cap = Rect.fromCenter(center: r.center.translate(0, -r.height * 0.15), width: r.width * 0.9, height: r.height * 0.4);
       canvas.drawOval(cap, glint);
     }
     // Pickups
     for (final pck in model.pickups) {
-      final r = pck.toRect(road);
+      final r = pck.toRect(road, baseW);
       final cap = Rect.fromCenter(center: r.center.translate(0, -r.height * 0.1), width: r.width * 0.8, height: r.height * 0.3);
       canvas.drawOval(cap, glint);
     }
@@ -989,18 +1002,19 @@ class _LeMansPainter extends CustomPainter {
   }
 
   void _drawWarnings(Canvas canvas, Size size) {
-    final pRect = model.player.toRect(road);
+    final baseW = model.refRoadWidth > 0 ? model.refRoadWidth : road.width;
+    final pRect = model.player.toRect(road, baseW);
     bool leftWarn = false, rightWarn = false;
     // lookahead window directly ahead of car
     for (final c in model.traffic) {
-      final r = c.toRect(road);
+      final r = c.toRect(road, baseW);
       if (r.top < pRect.top - 40 && r.top > pRect.top - size.height * 0.45) {
         if (r.center.dx < pRect.center.dx - pRect.width * 0.2) leftWarn = true;
         if (r.center.dx > pRect.center.dx + pRect.width * 0.2) rightWarn = true;
       }
     }
     for (final h in model.hazards) {
-      final r = h.toRect(road);
+      final r = h.toRect(road, baseW);
       if (r.top < pRect.top - 40 && r.top > pRect.top - size.height * 0.45) {
         if (r.center.dx < pRect.center.dx - pRect.width * 0.2) leftWarn = true;
         if (r.center.dx > pRect.center.dx + pRect.width * 0.2) rightWarn = true;
