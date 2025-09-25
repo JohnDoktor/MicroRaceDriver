@@ -844,22 +844,46 @@ class _LeMansPainter extends CustomPainter {
   bool shouldRepaint(covariant _LeMansPainter oldDelegate) => true;
 
   void _drawHeadlights(Canvas canvas, Size size, double intensity) {
-    final paint = Paint();
-    // Dark overlay layer
+    // Dark overlay layer, then cut out two soft cones using dstOut
     canvas.saveLayer(Offset.zero & size, Paint());
-    canvas.drawRect(Offset.zero & size, Paint()..color = Color.fromARGB((140 * intensity).round(), 0, 0, 0));
-    // Carve a soft cone around the player
+    final overlayAlpha = (180 * intensity).round().clamp(0, 255);
+    canvas.drawRect(Offset.zero & size, Paint()..color = Color.fromARGB(overlayAlpha, 0, 0, 0));
+
     final car = model.player.toRect(road);
-    final center = Offset(car.center.dx, car.top - car.height * 0.2);
-    final radius = road.width * 0.6;
-    final gradient = RadialGradient(
-      colors: [Colors.black, Colors.transparent],
-      stops: const [0.0, 1.0],
-    ).createShader(Rect.fromCircle(center: center, radius: radius));
-    paint
-      ..shader = gradient
-      ..blendMode = BlendMode.dstOut;
-    canvas.drawCircle(center, radius, paint);
+    final frontY = car.top + car.height * 0.1;
+    final leftOrigin = Offset(car.left + car.width * 0.28, frontY);
+    final rightOrigin = Offset(car.right - car.width * 0.28, frontY);
+
+    void cone(Offset origin, double spreadFrac, double length) {
+      final halfSpread = road.width * spreadFrac;
+      final tipY = origin.dy - length;
+      final leftTip = Offset(origin.dx - halfSpread, tipY);
+      final rightTip = Offset(origin.dx + halfSpread, tipY);
+      final path = Path()
+        ..moveTo(origin.dx, origin.dy)
+        ..lineTo(leftTip.dx, leftTip.dy)
+        ..lineTo(rightTip.dx, rightTip.dy)
+        ..close();
+      final p = Paint()
+        ..blendMode = BlendMode.dstOut
+        ..color = Colors.white
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10);
+      // Outer soft cone
+      canvas.drawPath(path, p);
+      // Inner brighter core for stronger illumination
+      final corePath = Path()
+        ..moveTo(origin.dx, origin.dy)
+        ..lineTo(origin.dx - halfSpread * 0.5, tipY)
+        ..lineTo(origin.dx + halfSpread * 0.5, tipY)
+        ..close();
+      canvas.drawPath(corePath, p);
+    }
+
+    final baseLength = road.height * (0.42 + 0.18 * model.speed);
+    final spread = 0.11; // fraction of road width at far end
+    cone(leftOrigin, spread, baseLength);
+    cone(rightOrigin, spread, baseLength);
+
     canvas.restore();
   }
 
