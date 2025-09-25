@@ -1,0 +1,5 @@
+RaceDriver is a fast, retro-inspired arcade racer with bold 80s vibes:
+cartoon-styled cars, neon-lit nights, and a smooth, responsive feel. Dodge
+traffic, avoid hazards, grab fuel and extra lives, and push your multiplier
+as you master the flow. Simple to learn, addictive to chase.
+

@@ -1,0 +1,4 @@
+• New continue feature (up to 3 times; score resets)
+• Smoother engine sound with crossfades
+• 80s-style background with parallax + fade-in
+• Music/engine volume balance improvements
