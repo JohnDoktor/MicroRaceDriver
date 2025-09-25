@@ -1359,7 +1359,7 @@ class _EngineAudio {
 
   Future<void> update(double speed) async {
     final freq = (140 + speed * 320).round();
-    final targetVol = (0.08 + speed * 0.20) * master; // slightly louder but still reduced
+    final targetVol = (0.04 + speed * 0.10) * master; // half previous engine loudness
     if (!_started) {
       final path = await _pathForFreq(freq);
       await _a.setReleaseMode(ReleaseMode.loop);
@@ -1372,7 +1372,7 @@ class _EngineAudio {
       return;
     }
     final df = (freq - _lastFreq).abs();
-    if (df > 30 && !_xfading) {
+    if (df > 20 && !_xfading) {
       // Crossfade to new loop to avoid gaps
       final path = await _pathForFreq(freq);
       final from = _curr;
@@ -1381,7 +1381,9 @@ class _EngineAudio {
       await to.setVolume(0.0);
       await to.play(DeviceFileSource(path));
       _xfading = true;
-      const steps = 25; // longer, smoother equal-power crossfade (~500ms)
+      // small pre-roll so the 'to' player is actually running before ramp
+      await Future.delayed(const Duration(milliseconds: 60));
+      const steps = 30; // ~600ms equal-power crossfade
       const stepMs = 20;
       for (int i = 1; i <= steps; i++) {
         final t = i / steps;
