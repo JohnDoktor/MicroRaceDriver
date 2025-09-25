@@ -946,7 +946,9 @@ class _LeMansPainter extends CustomPainter {
     for (int i = 0; i < boxes; i++) {
       final r = RRect.fromRectAndRadius(
           Rect.fromLTWH(x + i * (w + gap), y, w, h), const Radius.circular(2));
-      final col = i < filled ? _dim(C64Palette.cyan) : _dim(C64Palette.cyan, 0.15);
+      final Color col = i < filled
+          ? C64Palette.cyan
+          : C64Palette.cyan.withValues(alpha: 0.15);
       canvas.drawRRect(r, Paint()..color = col);
     }
     // Show 0 KM/H regardless of state
@@ -996,7 +998,7 @@ class _LeMansPainter extends CustomPainter {
     for (int i = 0; i < 3; i++) {
       final rect = Rect.fromLTWH(startX + i * (w + gap), startY, w, h);
       final alive = i < model.lives;
-      final color = alive ? _dim(C64Palette.cyan) : _dim(C64Palette.darkGray, 0.35);
+      final color = alive ? C64Palette.cyan : Colors.white24;
       _drawCar(canvas, rect, body: color);
     }
   }
