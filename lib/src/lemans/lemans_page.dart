@@ -85,6 +85,8 @@ class _GameModel {
   double elapsed = 0.0;
   // Extra life spawn timer (seconds). When <= 0 and lives < 3, spawn a life pickup.
   double lifePickupTimer = 120.0;
+  // Continues: player may continue up to 3 times after game over; score resets on continue
+  int continuesLeft = 3;
 }
 
 class _Skid {
@@ -168,7 +170,29 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
     model.roadWidthChangeTimer = 3.0;
     model.overtakeCooldown = 0.0;
     model.refRoadWidth = 0.0;
+    model.continuesLeft = 3;
     // Restart music from the beginning when a new game starts
+    _music.start();
+  }
+
+  void _continueGame() {
+    if (model.continuesLeft <= 0) return;
+    model.continuesLeft -= 1;
+    model.state = _GameState.running;
+    model.lives = 3;
+    model.score = 0;
+    model.speed = 0.0;
+    model.fuel = 100.0;
+    model.combo = 0; model.comboTimer = 0;
+    model.risk = 0.0; model.multiplier = 1.0;
+    model.invuln = 1.0;
+    model.safeStart = 6.0;
+    model.traffic.clear();
+    model.hazards.clear();
+    model.pickups.clear();
+    model.spawnCooldown = 0.5;
+    model.hazardCooldown = 1.0;
+    model.pickupCooldown = 2.0;
     _music.start();
   }
 
@@ -977,7 +1001,7 @@ class _LeMansPainter extends CustomPainter {
       canvas.drawRect(Offset.zero & size, overlay);
       final tp = TextPainter(
         text: const TextSpan(
-          text: 'GAME OVER\nTap to Restart',
+          text: ' ',
           style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w800),
         ),
         textAlign: TextAlign.center,
@@ -1673,6 +1697,45 @@ class LeMansPage extends StatelessWidget {
                 Positioned.fill(
                   child: CustomPaint(
                     painter: _LeMansPainter(model, road),
+                  ),
+                ),
+                if (model.state == _GameState.gameOver) Positioned.fill(
+                  child: Container(
+                    color: const Color.fromARGB(160, 0, 0, 0),
+                    child: Center(
+                      child: Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(color: Colors.black, border: Border.all(color: Colors.white30), borderRadius: BorderRadius.circular(12)),
+                        width: MediaQuery.of(context).size.width * 0.8,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Text('GAME OVER', style: TextStyle(fontFamily: 'VT323', fontSize: 28, color: Colors.white)),
+                            const SizedBox(height: 8),
+                            if (model.continuesLeft > 0)
+                              Text('Continue? (${model.continuesLeft} left)\nScore will reset to 0', textAlign: TextAlign.center, style: const TextStyle(fontFamily: 'VT323', fontSize: 18, color: Colors.white70)),
+                            const SizedBox(height: 12),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                              children: [
+                                if (model.continuesLeft > 0)
+                                  ElevatedButton(
+                                    onPressed: () {
+                                      final st = context.findAncestorStateOfType<_GameTickerState>();
+                                      st?._continueGame();
+                                    },
+                                    child: const Text('Continue', style: TextStyle(fontFamily: 'VT323', fontSize: 22)),
+                                  ),
+                                ElevatedButton(
+                                  onPressed: () { Navigator.of(context).pop(); },
+                                  child: const Text('Quit', style: TextStyle(fontFamily: 'VT323', fontSize: 22)),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                   ),
                 ),
                 // Pause button removed
