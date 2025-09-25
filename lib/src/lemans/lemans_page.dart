@@ -20,6 +20,7 @@ class _Car {
   double prevY = 0.0;
   bool passed = false;
   bool overtake = false; // special flag for post-game occasional passers
+  double speedScale = 0.7; // relative to ground flow for AI cars
   _Car(this.x, this.y, this.w, this.h);
   Rect toRect(Rect road) {
     final cx = road.center.dx + x * (road.width * _kLaneXFactor);
@@ -278,7 +279,8 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
       model.roadWidthChangeTimer -= dt;
       if (model.roadWidthChangeTimer <= 0) {
         model.roadWidthChangeTimer = rng.nextDouble() * 5.0 + 4.0; // 4..9s
-        model.roadWidthTarget = (rng.nextDouble() * 0.16 + 0.74); // 0.74..0.90 of screen width
+        // Allow slimmer roads: 0.37 .. 0.90 of screen width
+        model.roadWidthTarget = (rng.nextDouble() * (0.90 - 0.37) + 0.37);
       }
       final oldWidth = road.width;
       final wDelta = model.roadWidthTarget - model.roadWidthFactor;
@@ -310,7 +312,10 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
         // Keep distance from same-lane cars near spawn
         final tooClose = model.traffic.any((c) => (c.x - lane * 0.5).abs() < 0.1 && (c.y > 0.7));
         if (!tooClose) {
-          model.traffic.add(_Car(lane * 0.5, 1.1, 0.10, 0.18));
+          final car = _Car(lane * 0.5, 1.1, 0.10, 0.18);
+          // Randomize AI relative speed around ~70% of ground
+          car.speedScale = 0.7 + (rng.nextDouble() - 0.5) * 0.2; // 0.6..0.8
+          model.traffic.add(car);
         } else {
           model.spawnCooldown *= 0.4; // retry sooner
         }
@@ -346,7 +351,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
       // Base ground flow (matches road movement speed)
       final baseFlow = (2.8 * model.speed) * _speedFactor;
       // AI traffic should appear to drive forward, but slower than player → move slower than ground
-      double v = baseFlow * 0.7; // ~70% of ground speed
+      double v = baseFlow * (c.speedScale.clamp(0.5, 0.9)); // randomized per car
       if (model.state == _GameState.gameOver && model.speed == 0.0 && !c.overtake) {
         v = 0.0; // freeze normal traffic when fully stopped at game over
       }
