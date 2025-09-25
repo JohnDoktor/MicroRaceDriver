@@ -220,7 +220,8 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
               laneIndex = (laneIndex == 1 ? 0 : laneIndex + 1);
             }
             final lane = (laneIndex * 0.5).toDouble();
-            final oc = _Car(lane, 1.05, 0.10, 0.18);
+            // Spawn just below the bottom so it rises upward to overtake the player
+            final oc = _Car(lane, -0.12, 0.10, 0.18);
             oc.overtake = true;
             model.traffic.add(oc);
           }
@@ -341,15 +342,22 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
     // Move traffic toward player; remove offscreen and add score
     for (final c in model.traffic) {
       c.prevY = c.y;
-      double v = (0.7 + 2.3 * model.speed) * _speedFactor; // default flow
+      double v = (0.7 + 2.3 * model.speed) * _speedFactor; // default flow (downward)
       if (model.state == _GameState.gameOver && model.speed == 0.0 && !c.overtake) {
         v = 0.0; // freeze normal traffic when fully stopped at game over
       }
       if (c.overtake) {
-        v = 0.9 * _speedFactor; // steady overtake pace independent of player speed
+        v = -0.9 * _speedFactor; // negative makes it move upward (bottom -> top)
       }
       c.y -= dt * v;
-      if (!c.passed && c.y <= model.player.y + 0.02) {
+      // Mark pass and play whoosh when crossing the player's Y
+      if (!c.passed && !c.overtake && c.y <= model.player.y + 0.02) {
+        c.passed = true;
+        if ((c.x - model.player.x).abs() < 0.22) {
+          audio.whoosh();
+        }
+      }
+      if (!c.passed && c.overtake && c.y >= model.player.y - 0.02) {
         c.passed = true;
         if ((c.x - model.player.x).abs() < 0.22) {
           audio.whoosh();
@@ -357,7 +365,9 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
       }
     }
     model.traffic.removeWhere((c) {
-      if (c.y < -0.3) {
+      // Remove offscreen: normal traffic when it goes below bottom, overtake when it exits above top
+      final offscreen = c.overtake ? (c.y > 1.3) : (c.y < -0.3);
+      if (offscreen) {
         if (model.state == _GameState.running) {
           model.combo += 1; model.comboTimer = 2.0;
           final base = 10 * math.max(1, model.combo ~/ 3);
