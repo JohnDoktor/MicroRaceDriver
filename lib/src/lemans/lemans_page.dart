@@ -1359,12 +1359,11 @@ class _EngineAudio {
 
   Future<void> update(double speed) async {
     final freq = (140 + speed * 320).round();
-    final targetVol = (0.05 + speed * 0.15) * master; // lowered overall
+    final targetVol = (0.08 + speed * 0.20) * master; // slightly louder but still reduced
     if (!_started) {
       final path = await _pathForFreq(freq);
       await _a.setReleaseMode(ReleaseMode.loop);
       await _a.setVolume(targetVol.clamp(0.0, 1.0));
-      await _a.setPlaybackRate(1.0);
       await _a.play(DeviceFileSource(path));
       _usingA = true;
       _started = true;
@@ -1373,25 +1372,16 @@ class _EngineAudio {
       return;
     }
     final df = (freq - _lastFreq).abs();
-    // Small adjustments: use playback rate warping to avoid restart
-    if (df <= 10 && !_xfading) {
-      final ratio = (freq / (_lastFreq == 0 ? freq.toDouble() : _lastFreq.toDouble())).clamp(0.85, 1.2);
-      await _curr.setPlaybackRate(ratio);
-      await _curr.setVolume(targetVol.clamp(0.0, 1.0));
-      _currentVol = targetVol;
-      return;
-    }
-    if (df > 10 && !_xfading) {
+    if (df > 30 && !_xfading) {
       // Crossfade to new loop to avoid gaps
       final path = await _pathForFreq(freq);
       final from = _curr;
       final to = _next;
       await to.setReleaseMode(ReleaseMode.loop);
       await to.setVolume(0.0);
-      await to.setPlaybackRate(1.0);
       await to.play(DeviceFileSource(path));
       _xfading = true;
-      const steps = 15; // longer, smoother crossfade
+      const steps = 16; // smooth equal-power crossfade
       const stepMs = 20;
       for (int i = 1; i <= steps; i++) {
         final t = i / steps;
@@ -1403,7 +1393,7 @@ class _EngineAudio {
         await Future.delayed(const Duration(milliseconds: stepMs));
       }
       await from.stop();
-      await to.setPlaybackRate(1.0);
+      await to.setVolume(targetVol.clamp(0.0, 1.0));
       _usingA = !_usingA;
       _lastFreq = freq;
       _currentVol = targetVol;
@@ -1415,6 +1405,10 @@ class _EngineAudio {
       final p = _usingA ? _a : _b;
       await p.setVolume(targetVol.clamp(0.0, 1.0));
       _currentVol = targetVol;
+      // Fallback: if player stopped for any reason, restart current loop
+      final path = await _pathForFreq(_lastFreq == 0 ? freq : _lastFreq);
+      // This call is safe; if already playing, player will ignore
+      await p.play(DeviceFileSource(path));
     }
   }
 
