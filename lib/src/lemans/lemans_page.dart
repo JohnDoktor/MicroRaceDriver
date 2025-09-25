@@ -228,18 +228,20 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
     final phase = (elapsed.inMilliseconds / 40000.0) % 2.0; // 0..2
     model.night = phase < 1 ? phase : (2 - phase);
 
-    // Curvature evolution: pick a new target periodically and ease toward it.
-    model.curveChangeTimer -= dt;
-    if (model.curveChangeTimer <= 0) {
-      model.curveChangeTimer = rng.nextDouble() * 4.0 + 3.0; // 3..7s
-      model.curveTarget = (rng.nextDouble() * 2 - 1) * 0.9; // -0.9..0.9
-    }
-    final curveDelta = (model.curveTarget - model.curveOffset);
-    final maxStep = dt * 0.25 * (0.6 + model.speed); // faster at speed
-    if (curveDelta.abs() > maxStep) {
-      model.curveOffset += maxStep * curveDelta.sign;
-    } else {
-      model.curveOffset = model.curveTarget;
+    // Curvature evolution: freeze when speed is 0 (no turning)
+    if (model.speed > 0) {
+      model.curveChangeTimer -= dt;
+      if (model.curveChangeTimer <= 0) {
+        model.curveChangeTimer = rng.nextDouble() * 4.0 + 3.0; // 3..7s
+        model.curveTarget = (rng.nextDouble() * 2 - 1) * 0.9; // -0.9..0.9
+      }
+      final curveDelta = (model.curveTarget - model.curveOffset);
+      final maxStep = dt * 0.25 * (0.6 + model.speed); // faster at speed
+      if (curveDelta.abs() > maxStep) {
+        model.curveOffset += maxStep * curveDelta.sign;
+      } else {
+        model.curveOffset = model.curveTarget;
+      }
     }
 
     // Keep player's absolute X stable when road sways (car shouldn't auto-turn)
@@ -249,25 +251,27 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
       model.player.x -= dxRoad / (road.width * _kLaneXFactor);
     }
 
-    // Road width evolution (narrow/widen over time) with compensation
-    model.roadWidthChangeTimer -= dt;
-    if (model.roadWidthChangeTimer <= 0) {
-      model.roadWidthChangeTimer = rng.nextDouble() * 5.0 + 4.0; // 4..9s
-      model.roadWidthTarget = (rng.nextDouble() * 0.16 + 0.74); // 0.74..0.90 of screen width
+    // Road width evolution (freeze at 0 speed). When active, keep player position stable
+    if (model.speed > 0) {
+      model.roadWidthChangeTimer -= dt;
+      if (model.roadWidthChangeTimer <= 0) {
+        model.roadWidthChangeTimer = rng.nextDouble() * 5.0 + 4.0; // 4..9s
+        model.roadWidthTarget = (rng.nextDouble() * 0.16 + 0.74); // 0.74..0.90 of screen width
+      }
+      final oldWidth = road.width;
+      final wDelta = model.roadWidthTarget - model.roadWidthFactor;
+      final wStep = (dt * 0.12).clamp(0.0, 0.12);
+      if (wDelta.abs() > wStep) {
+        model.roadWidthFactor += wStep * wDelta.sign;
+      } else {
+        model.roadWidthFactor = model.roadWidthTarget;
+      }
+      // Recompute road and compensate player x to keep screen position stable
+      final roadAfterWidth = _roadRectForSize(Size(size.width, size.height));
+      final scale = oldWidth / roadAfterWidth.width;
+      model.player.x = (model.player.x * scale).clamp(-1.0, 1.0);
+      road = roadAfterWidth;
     }
-    final oldWidth = road.width;
-    final wDelta = model.roadWidthTarget - model.roadWidthFactor;
-    final wStep = (dt * 0.12).clamp(0.0, 0.12);
-    if (wDelta.abs() > wStep) {
-      model.roadWidthFactor += wStep * wDelta.sign;
-    } else {
-      model.roadWidthFactor = model.roadWidthTarget;
-    }
-    // Recompute road and compensate player x to keep screen position stable
-    final roadAfterWidth = _roadRectForSize(Size(size.width, size.height));
-    final scale = oldWidth / roadAfterWidth.width;
-    model.player.x = (model.player.x * scale).clamp(-1.0, 1.0);
-    road = roadAfterWidth;
 
     // Spawn AI traffic while running
     if (model.state == _GameState.running) {
