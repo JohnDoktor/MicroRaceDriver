@@ -1371,7 +1371,7 @@ class _EngineAudio {
 
   Future<void> update(double speed) async {
     final freq = (140 + speed * 320).round();
-    final targetVol = (0.04 + speed * 0.10) * master; // half previous engine loudness
+    final targetVol = (0.02 + speed * 0.06) * master; // further reduced engine loudness
     if (!_started) {
       final path = await _pathForFreq(freq);
       await _a.setReleaseMode(ReleaseMode.loop);
