@@ -664,10 +664,37 @@ class _LeMansPainter extends CustomPainter {
     if (model.night > 0.4) {
       final darkness = (model.night - 0.4) / 0.6; // 0..1
       _drawHeadlights(canvas, size, darkness);
+      // Emissive tail lights so they visibly glow in the dark
+      _drawTailLightEmission(canvas);
     }
 
     // HUD (drawn after darkness overlay so it remains bright)
     _drawHud(canvas, size);
+  }
+
+  void _drawTailLightEmission(Canvas canvas) {
+    // Extra emissive pass drawn after darkness to ensure visibility at night
+    final n = ((model.night - 0.4) / 0.6).clamp(0.0, 1.0);
+    if (n <= 0.0) return;
+    final glow = Paint()
+      ..blendMode = BlendMode.screen
+      ..color = Color.fromARGB((90 + 80 * n).round(), 255, 40, 40)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
+    void drawFor(Rect r) {
+      final tlW = r.width * 0.16;
+      final tlH = r.height * 0.10;
+      final y = r.bottom - tlH - r.height * 0.06;
+      final left = Rect.fromLTWH(r.left + r.width * 0.08, y, tlW, tlH);
+      final right = Rect.fromLTWH(r.right - r.width * 0.08 - tlW, y, tlW, tlH);
+      canvas.drawRect(left.inflate(3), glow);
+      canvas.drawRect(right.inflate(3), glow);
+    }
+    // Traffic
+    for (final c in model.traffic) {
+      drawFor(c.toRect(road));
+    }
+    // Player
+    drawFor(model.player.toRect(road));
   }
 
   void _drawHatch(Canvas canvas, Rect r) {
@@ -766,21 +793,29 @@ class _LeMansPainter extends CustomPainter {
     canvas.drawRect(Rect.fromLTWH(r.left - wheelW * 0.5, r.bottom - wheelH - r.height * 0.12, wheelW, wheelH), pWheel);
     canvas.drawRect(
         Rect.fromLTWH(r.right - wheelW * 0.5, r.bottom - wheelH - r.height * 0.12, wheelW, wheelH), pWheel);
-    // tail lights for AI traffic
+    // tail lights for cars — glow intensifies with night
     if (tailLights) {
       final tlW = r.width * 0.16;
       final tlH = r.height * 0.10;
       final y = r.bottom - tlH - r.height * 0.06;
       final left = Rect.fromLTWH(r.left + r.width * 0.08, y, tlW, tlH);
       final right = Rect.fromLTWH(r.right - r.width * 0.08 - tlW, y, tlW, tlH);
-      final glow = Paint()
-        ..color = const Color.fromARGB(150, 255, 0, 0)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
-      final core = Paint()..color = const Color(0xFFFF3030);
-      canvas.drawRect(left.inflate(2), glow);
-      canvas.drawRect(right.inflate(2), glow);
-      canvas.drawRect(left, core);
-      canvas.drawRect(right, core);
+      final n = ((model.night - 0.35) / 0.65).clamp(0.0, 1.0);
+      // During day: dim lens only; at night: bright core + local glow (also reinforced post-overlay)
+      if (n <= 0.0) {
+        final lens = Paint()..color = const Color(0xFF7A2020);
+        canvas.drawRect(left, lens);
+        canvas.drawRect(right, lens);
+      } else {
+        final glow = Paint()
+          ..color = Color.fromARGB((110 + 70 * n).round(), 255, 0, 0)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
+        final core = Paint()..color = const Color(0xFFFF3030);
+        canvas.drawRect(left.inflate(2), glow);
+        canvas.drawRect(right.inflate(2), glow);
+        canvas.drawRect(left, core);
+        canvas.drawRect(right, core);
+      }
     }
     // front headlights for player (white)
     if (headLights) {
