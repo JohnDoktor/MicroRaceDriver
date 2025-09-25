@@ -136,11 +136,14 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
   final _Audio audio = _Audio();
   static const double _speedFactor = 0.35; // Global pacing: slower overall
   final _EngineAudio _engine = _EngineAudio();
+  final _Music _music = _Music();
 
   @override
   void initState() {
     super.initState();
     _ticker = createTicker(_onTick)..start();
+    // Start background chiptune
+    _music.start();
   }
 
   void _reset() {
@@ -606,6 +609,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
     _ticker.dispose();
     audio.dispose();
     _engine.dispose();
+    _music.dispose();
     super.dispose();
   }
 }
@@ -1256,6 +1260,177 @@ class _EngineAudio {
     }
   }
   void dispose() { _p.dispose(); }
+}
+
+class _Music {
+  final AudioPlayer _p = AudioPlayer();
+  bool _started = false;
+  Future<void> start() async {
+    if (_started) return;
+    final bytes = _makeLoop();
+    await _p.setReleaseMode(ReleaseMode.loop);
+    await _p.setVolume(0.2);
+    await _p.play(BytesSource(bytes));
+    _started = true;
+  }
+  void dispose() { _p.dispose(); }
+
+  Uint8List _makeLoop() {
+    // Simple 4-bar chiptune at 120 BPM (4/4), 16th-note steps (64 steps total)
+    const sr = 22050;
+    const bpm = 120.0;
+    const beatSec = 60.0 / bpm; // 0.5s
+    const stepSec = beatSec / 4.0; // 16th note = 0.125s
+    const steps = 64; // 4 bars
+    final totalSamples = (steps * stepSec * sr).round();
+    final mix = List<double>.filled(totalSamples, 0.0);
+
+    double noteHz(int midi) => 440.0 * math.pow(2.0, (midi - 69) / 12.0);
+    double square(double t, double hz, {double duty = 0.5}) {
+      final phase = (t * hz) % 1.0;
+      return phase < duty ? 1.0 : -1.0;
+    }
+    double tri(double t, double hz) {
+      final p = (t * hz) % 1.0;
+      return 4.0 * (p - 0.5).abs() - 1.0;
+    }
+    double envAD(double t, double dur, {double a = 0.01, double d = 0.12}) {
+      if (t < 0) return 0;
+      if (t < a) return t / a;
+      final rest = (dur - a).clamp(0.0001, dur);
+      final tt = (t - a) / rest;
+      final e = (1.0 - tt).clamp(0.0, 1.0);
+      return e;
+    }
+    double noise(int i) {
+      // cheap hash noise in -1..1
+      int x = i * 1103515245 + 12345;
+      x = (x >> 3) ^ (x << 1);
+      return ((x & 1023) / 511.5) - 1.0;
+    }
+
+    void addVoice(List<int> midiSeq, {double vol = 0.2, String wave = 'square', double duty = 0.5, int stepDiv = 1}) {
+      for (int s = 0; s < steps; s++) {
+        final midi = midiSeq[s % midiSeq.length];
+        if (midi <= 0) continue; // rest
+        final start = (s * stepSec * sr).round();
+        final len = (stepSec * sr / stepDiv).round();
+        final f = noteHz(midi);
+        for (int i = 0; i < len && start + i < totalSamples; i++) {
+          final t = i / sr;
+          final e = envAD(t, len / sr, a: 0.01, d: 0.15);
+          final sampleT = (i / sr);
+          double w;
+          if (wave == 'square') {
+            w = square(sampleT, f, duty: duty);
+          } else {
+            w = tri(sampleT, f);
+          }
+          mix[start + i] += w * e * vol;
+        }
+      }
+    }
+
+    // Chords progression in C minor: Cm -> Ab -> Bb -> G
+    final chords = <List<int>>[
+      [60, 63, 67], // C, Eb, G
+      [56, 60, 63], // Ab, C, Eb
+      [58, 62, 65], // Bb, D, F
+      [55, 59, 62], // G, Bb, D
+    ];
+    // Lead pattern over 4 bars (16 steps per bar)
+    final lead = <int>[];
+    for (int bar = 0; bar < 4; bar++) {
+      final chord = chords[bar % chords.length];
+      final root = chord[0];
+      final third = chord[1];
+      final fifth = chord[2];
+      final pattern = [root + 12, third + 12, fifth + 12, third + 12];
+      for (int i = 0; i < 16; i++) {
+        lead.add(pattern[i % pattern.length]);
+      }
+    }
+    // Bass: roots on quarter notes, one octave down
+    final bass = <int>[];
+    for (int bar = 0; bar < 4; bar++) {
+      final root = chords[bar % chords.length][0] - 12;
+      for (int i = 0; i < 16; i++) {
+        bass.add((i % 4 == 0) ? root : 0);
+      }
+    }
+    // Arp: fast 32nd-note arpeggio implied by stepDiv=2
+    final arp = <int>[];
+    for (int bar = 0; bar < 4; bar++) {
+      final c = chords[bar % chords.length];
+      final seq = [c[0] + 12, c[1] + 12, c[2] + 12, c[1] + 12];
+      for (int i = 0; i < 16; i++) { arp.add(seq[i % 4]); }
+    }
+    // Drums: kick on 1 & 3, snare on 2 & 4, hats on 8ths
+    void addKick() {
+      final kickLen = (stepSec * sr * 1.0).round();
+      for (int s = 0; s < steps; s += 8) { // on beats 1 and 3
+        final idx = (s * stepSec * sr).round();
+        for (int i = 0; i < kickLen && idx + i < totalSamples; i++) {
+          final t = i / sr;
+          final env = envAD(t, kickLen / sr, a: 0.005, d: 0.18);
+          final f = 120.0 + 80.0 * (1.0 - t * 8).clamp(0.0, 1.0);
+          final w = math.sin(2 * math.pi * f * t);
+          mix[idx + i] += w * env * 0.35;
+        }
+      }
+    }
+    void addSnare() {
+      final snLen = (stepSec * sr * 1.0).round();
+      for (int s = 4; s < steps; s += 8) { // beats 2 and 4
+        final idx = (s * stepSec * sr).round();
+        for (int i = 0; i < snLen && idx + i < totalSamples; i++) {
+          final t = i / sr;
+          final env = envAD(t, snLen / sr, a: 0.002, d: 0.12);
+          final w = noise(idx + i);
+          mix[idx + i] += w * env * 0.25;
+        }
+      }
+    }
+    void addHats() {
+      final hatLen = (stepSec * sr * 0.5).round();
+      for (int s = 0; s < steps; s += 2) { // 8ths
+        final idx = (s * stepSec * sr).round();
+        for (int i = 0; i < hatLen && idx + i < totalSamples; i++) {
+          final t = i / sr;
+          final env = envAD(t, hatLen / sr, a: 0.001, d: 0.05);
+          final w = noise(idx + i);
+          mix[idx + i] += w * env * 0.12;
+        }
+      }
+    }
+
+    addVoice(lead, vol: 0.18, wave: 'square', duty: 0.5);
+    addVoice(arp, vol: 0.12, wave: 'square', duty: 0.25, stepDiv: 2);
+    addVoice(bass, vol: 0.20, wave: 'tri');
+    addKick();
+    addSnare();
+    addHats();
+
+    // Normalize and convert to 16-bit PCM
+    double mx = 0.001;
+    for (final v in mix) { final av = v.abs(); if (av > mx) mx = av; }
+    final scale = 0.85 / mx;
+    final bytes = BytesBuilder();
+    // WAV header
+    final byteRate = sr * 2;
+    final subchunk2Size = totalSamples * 2;
+    final chunkSize = 36 + subchunk2Size;
+    void w32(int v) => bytes.add([v & 0xFF, (v >> 8) & 0xFF, (v >> 16) & 0xFF, (v >> 24) & 0xFF]);
+    void w16(int v) => bytes.add([v & 0xFF, (v >> 8) & 0xFF]);
+    bytes.add('RIFF'.codeUnits); w32(chunkSize); bytes.add('WAVE'.codeUnits);
+    bytes.add('fmt '.codeUnits); w32(16); w16(1); w16(1); w32(sr); w32(byteRate); w16(2); w16(16);
+    bytes.add('data'.codeUnits); w32(subchunk2Size);
+    for (int i = 0; i < totalSamples; i++) {
+      final v = (mix[i] * scale * 32767).clamp(-32768, 32767).toInt();
+      w16(v);
+    }
+    return bytes.toBytes();
+  }
 }
 
 class LeMansPage extends StatelessWidget {
