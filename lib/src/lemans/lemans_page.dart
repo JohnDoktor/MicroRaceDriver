@@ -1309,7 +1309,7 @@ Uint8List _engineWavBytes({required int freq, required int ms}) {
   final rnd = math.Random();
 
   double prev = 0.0;
-  final fade = (sr * 0.01).round(); // 10ms fade to avoid loop clicks
+  final fade = (sr * 0.005).round(); // 5ms fade to avoid loop clicks
   for (int i = 0; i < total; i++) {
     final t = i / sr;
     // Pulse train at f0
@@ -1381,7 +1381,7 @@ class _EngineAudio {
       await to.setVolume(0.0);
       await to.play(DeviceFileSource(path));
       _xfading = true;
-      const steps = 16; // smooth equal-power crossfade
+      const steps = 25; // longer, smoother equal-power crossfade (~500ms)
       const stepMs = 20;
       for (int i = 1; i <= steps; i++) {
         final t = i / steps;
@@ -1414,7 +1414,7 @@ class _EngineAudio {
 
   Future<String> _pathForFreq(int freq) async {
     if (_cache.containsKey(freq)) return _cache[freq]!;
-    final bytes = _engineWavBytes(freq: freq, ms: 1000);
+    final bytes = _engineWavBytes(freq: freq, ms: 2000);
     final path = await _writeTempWav(bytes, prefix: 'eng_$freq');
     _cache[freq] = path;
     return path;
@@ -1429,7 +1429,7 @@ class _EngineAudio {
 class _Music {
   final AudioPlayer _p = AudioPlayer();
   bool _started = false;
-  double master = 0.35;
+  double master = 0.18; // half of previous default
   Future<void> start() async {
     if (_started) return;
     final bytes = _makeLoop();

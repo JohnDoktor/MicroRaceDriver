@@ -8,7 +8,7 @@ class GameConfig {
   const GameConfig({
     this.controlMode = ControlMode.both,
     this.difficulty = 1.0,
-    this.musicVolume = 0.4,
+    this.musicVolume = 0.2,
     this.sfxVolume = 1.0,
     this.musicEnabled = true,
     this.sfxEnabled = true,
