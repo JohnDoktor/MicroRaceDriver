@@ -82,6 +82,8 @@ class _GameModel {
   double refRoadWidth = 0.0;
   // Elapsed running time in seconds (for progression)
   double elapsed = 0.0;
+  // Extra life spawn timer (seconds). When <= 0 and lives < 3, spawn a life pickup.
+  double lifePickupTimer = 120.0;
 }
 
 class _Skid {
@@ -90,7 +92,7 @@ class _Skid {
 }
 
 enum _HazardType { oil, puddle }
-enum _PickupType { fuel }
+enum _PickupType { fuel, life }
 
 class _Hazard {
   final _HazardType type;
@@ -372,6 +374,18 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
         final lane = (rng.nextInt(3) - 1) * 0.5;
         model.pickups.add(_Pickup(_PickupType.fuel, lane.toDouble(), 1.05));
       }
+      // Extra life pickup: every 120s when lives < 3
+      if (model.lifePickupTimer > 0) {
+        model.lifePickupTimer -= dt;
+      }
+      if (model.lifePickupTimer <= 0 && model.lives < 3) {
+        final hasExistingLife = model.pickups.any((p) => p.type == _PickupType.life && p.y > 0);
+        if (!hasExistingLife) {
+          final lane = (rng.nextInt(3) - 1) * 0.5;
+          model.pickups.add(_Pickup(_PickupType.life, lane.toDouble(), 1.05));
+          model.lifePickupTimer = 120.0; // reset timer after spawning
+        }
+      }
       // Combo timer decay
       model.comboTimer -= dt;
       if (model.comboTimer < 0) { model.comboTimer = 0; model.combo = 0; }
@@ -471,14 +485,23 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
           }
         }
       }
-    for (final p in model.pickups) {
-      if (p.toRect(road, baseW).overlaps(pRect)) {
+      for (final p in model.pickups) {
+        if (p.toRect(road, baseW).overlaps(pRect)) {
           switch (p.type) {
             case _PickupType.fuel:
               model.fuel = math.min(100.0, model.fuel + 25);
               model.score += 50;
               audio.beep(880, 70);
               audio.beep(660, 70);
+              break;
+            case _PickupType.life:
+              if (model.lives < 3) {
+                model.lives += 1;
+                model.score += 100;
+              }
+              // distinctive chime
+              audio.beep(990, 80);
+              audio.beep(1320, 80);
               break;
           }
           p.y = -1; // mark for removal
@@ -683,6 +706,15 @@ class _LeMansPainter extends CustomPainter {
           // small fuel icon stripe
           canvas.drawRect(Rect.fromLTWH(r.left + r.width*0.2, r.top + r.height*0.4, r.width*0.6, r.height*0.2),
             Paint()..color = Colors.brown);
+          break;
+        case _PickupType.life:
+          // green life box with white plus icon
+          final paint = Paint()..color = C64Palette.green;
+          canvas.drawRRect(RRect.fromRectAndRadius(r, const Radius.circular(3)), paint);
+          final plusW = r.width * 0.6;
+          final plusT = r.height * 0.18;
+          canvas.drawRect(Rect.fromCenter(center: r.center, width: plusW, height: plusT), Paint()..color = Colors.white);
+          canvas.drawRect(Rect.fromCenter(center: r.center, width: plusT, height: plusW), Paint()..color = Colors.white);
           break;
       }
     }
