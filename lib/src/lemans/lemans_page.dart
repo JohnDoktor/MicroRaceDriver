@@ -452,7 +452,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
             // brief slip effect
             model.player.x += (rng.nextDouble() - 0.5) * 0.3;
             model.speed = math.max(0.3, model.speed * 0.6);
-            audio.beep(220, 90);
+            audio.screech();
             model.shake = 0.2;
             // Drop quick skid marks at tires
           final pr = model.player.toRect(road, baseW);
@@ -463,7 +463,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
           } else {
             // puddle slows down a bit and darkens screen briefly
             model.speed = math.max(0.25, model.speed * 0.7);
-            audio.beep(300, 80);
+            audio.splash();
             model.shake = 0.15;
           }
           model.invuln = 1.0; // grace window to avoid chain hits
@@ -473,6 +473,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
           if (model.lives <= 0) {
             model.state = _GameState.gameOver;
             model.hiScore = math.max(model.hiScore, model.score);
+            audio.gameOver();
           }
         }
       }
@@ -503,7 +504,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
       if (model.invuln <= 0 && car.toRect(road, baseW).deflate(baseW * 0.02).overlaps(pRect.deflate(baseW * 0.02))) {
         // Simple collision penalty
         model.speed = 0.2;
-        audio.beep(120, 120);
+        audio.crash();
         model.shake = 0.25;
         model.invuln = 1.0;
         model.risk = 0.0; model.multiplier = 1.0;
@@ -512,6 +513,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
         if (model.lives <= 0) {
           model.state = _GameState.gameOver;
           model.hiScore = math.max(model.hiScore, model.score);
+          audio.gameOver();
         }
         break;
         }
@@ -521,7 +523,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
       final driveRight = road.right - road.width * 0.08;
       if (model.invuln <= 0 && (pRect.left < driveLeft || pRect.right > driveRight)) {
       model.speed = math.max(0.25, model.speed * 0.6);
-      audio.beep(180, 100);
+      audio.crash();
       model.shake = 0.2;
       model.invuln = 0.5;
         // Nudge back onto road
@@ -535,6 +537,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
         if (model.lives <= 0) {
           model.state = _GameState.gameOver;
           model.hiScore = math.max(model.hiScore, model.score);
+          audio.gameOver();
         }
       }
     }
@@ -1136,6 +1139,46 @@ class _Audio {
     } catch (_) {}
   }
 
+  // New synthesized effects
+  Future<void> screech() async {
+    // short rising tone + noise burst
+    try {
+      final p = AudioPlayer()..setPlayerMode(PlayerMode.lowLatency);
+      await p.play(BytesSource(_sineWavBytes(freq: 1200, ms: 60, vol: 0.5)));
+      await p.play(BytesSource(_noiseWavBytes(ms: 90, vol: 0.35)));
+      p.dispose();
+    } catch (_) {}
+  }
+
+  Future<void> splash() async {
+    // short filtered noise burst
+    try {
+      final p = AudioPlayer()..setPlayerMode(PlayerMode.lowLatency);
+      await p.play(BytesSource(_noiseWavBytes(ms: 120, vol: 0.45)));
+      p.dispose();
+    } catch (_) {}
+  }
+
+  Future<void> crash() async {
+    // thud (low sine) + noise
+    try {
+      final p = AudioPlayer()..setPlayerMode(PlayerMode.lowLatency);
+      await p.play(BytesSource(_sineWavBytes(freq: 180, ms: 90, vol: 0.7)));
+      await p.play(BytesSource(_noiseWavBytes(ms: 110, vol: 0.5)));
+      p.dispose();
+    } catch (_) {}
+  }
+
+  Future<void> gameOver() async {
+    try {
+      final p = AudioPlayer()..setPlayerMode(PlayerMode.lowLatency);
+      await p.play(BytesSource(_sineWavBytes(freq: 660, ms: 120, vol: 0.5)));
+      await p.play(BytesSource(_sineWavBytes(freq: 440, ms: 150, vol: 0.6)));
+      await p.play(BytesSource(_sineWavBytes(freq: 330, ms: 180, vol: 0.6)));
+      p.dispose();
+    } catch (_) {}
+  }
+
   void dispose() {
     _player.dispose();
   }
@@ -1159,6 +1202,30 @@ Uint8List _sineWavBytes({required int freq, required int ms, double vol = 1.0}) 
   for (int i = 0; i < totalSamples; i++) {
     final t = i / sampleRate;
     final s = (math.sin(2 * math.pi * freq * t) * 0.5 * vol);
+    final v = (s * 32767).clamp(-32768, 32767).toInt();
+    w16(v);
+  }
+  return data.toBytes();
+}
+
+Uint8List _noiseWavBytes({required int ms, double vol = 1.0}) {
+  const sampleRate = 22050;
+  final totalSamples = (sampleRate * ms / 1000).floor();
+  final data = BytesBuilder();
+  // WAV header for 16-bit PCM
+  final byteRate = sampleRate * 2;
+  final blockAlign = 2;
+  final subchunk2Size = totalSamples * 2;
+  final chunkSize = 36 + subchunk2Size;
+  void w32(int v) => data.add([v & 0xFF, (v >> 8) & 0xFF, (v >> 16) & 0xFF, (v >> 24) & 0xFF]);
+  void w16(int v) => data.add([v & 0xFF, (v >> 8) & 0xFF]);
+  data.add('RIFF'.codeUnits); w32(chunkSize); data.add('WAVE'.codeUnits);
+  data.add('fmt '.codeUnits); w32(16); w16(1); w16(1); w32(sampleRate); w32(byteRate); w16(blockAlign); w16(16);
+  data.add('data'.codeUnits); w32(subchunk2Size);
+  final rand = math.Random();
+  for (int i = 0; i < totalSamples; i++) {
+    // simple white noise, scaled
+    final s = ((rand.nextDouble() * 2 - 1) * 0.4 * vol);
     final v = (s * 32767).clamp(-32768, 32767).toInt();
     w16(v);
   }
