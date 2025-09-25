@@ -80,6 +80,8 @@ class _GameModel {
   double overtakeCooldown = 0.0;
   // Reference road width (pixels) for stable object sizing
   double refRoadWidth = 0.0;
+  // Elapsed running time in seconds (for progression)
+  double elapsed = 0.0;
 }
 
 class _Skid {
@@ -201,6 +203,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
         // target speed ramps to 1.0
         model.speed = (model.speed + dt * 0.25 / model.config.difficulty).clamp(0.0, 1.0);
         model.timeLeft -= dt;
+        model.elapsed += dt; // accumulate runtime for progressive difficulty
         // Fuel consumption scales with speed and difficulty
         model.fuel -= dt * (0.5 + model.speed * 1.2) * model.config.difficulty;
         if (model.fuel < 0) model.fuel = 0;
@@ -285,32 +288,45 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
 
     // Road width evolution (freeze at 0 speed). When active, keep player position stable
     if (model.speed > 0) {
-      model.roadWidthChangeTimer -= dt;
-      if (model.roadWidthChangeTimer <= 0) {
-        model.roadWidthChangeTimer = rng.nextDouble() * 5.0 + 4.0; // 4..9s
-        // Allow slimmer roads: 0.37 .. 0.90 of screen width
-        model.roadWidthTarget = (rng.nextDouble() * (0.90 - 0.37) + 0.37);
+      // First minute: keep width stable (no slimming)
+      if (model.elapsed >= 60.0) {
+        model.roadWidthChangeTimer -= dt;
+        if (model.roadWidthChangeTimer <= 0) {
+          model.roadWidthChangeTimer = rng.nextDouble() * 5.0 + 4.0; // 4..9s
+          // Progressive min width per minute; after ~4 min reach ~0.37
+          final minutes = model.elapsed / 60.0;
+          final t = minutes.clamp(0.0, 4.0) / 4.0; // 0..1 over 0..4 min
+          final minWidth = 0.86 - (0.49 * t); // 0.86 -> ~0.37
+          final maxWidth = 0.90;
+          model.roadWidthTarget = rng.nextDouble() * (maxWidth - minWidth) + minWidth;
+        }
+        final oldWidth = road.width;
+        final wDelta = model.roadWidthTarget - model.roadWidthFactor;
+        final wStep = (dt * 0.12).clamp(0.0, 0.12);
+        if (wDelta.abs() > wStep) {
+          model.roadWidthFactor += wStep * wDelta.sign;
+        } else {
+          model.roadWidthFactor = model.roadWidthTarget;
+        }
+        // Recompute road and compensate player x to keep screen position stable
+        final roadAfterWidth = _roadRectForSize(Size(size.width, size.height));
+        final scale = oldWidth / roadAfterWidth.width;
+        model.player.x = (model.player.x * scale).clamp(-1.0, 1.0);
+        road = roadAfterWidth;
       }
-      final oldWidth = road.width;
-      final wDelta = model.roadWidthTarget - model.roadWidthFactor;
-      final wStep = (dt * 0.12).clamp(0.0, 0.12);
-      if (wDelta.abs() > wStep) {
-        model.roadWidthFactor += wStep * wDelta.sign;
-      } else {
-        model.roadWidthFactor = model.roadWidthTarget;
-      }
-      // Recompute road and compensate player x to keep screen position stable
-      final roadAfterWidth = _roadRectForSize(Size(size.width, size.height));
-      final scale = oldWidth / roadAfterWidth.width;
-      model.player.x = (model.player.x * scale).clamp(-1.0, 1.0);
-      road = roadAfterWidth;
     }
 
     // Spawn AI traffic while running
     if (model.state == _GameState.running) {
-      model.spawnCooldown -= dt * (0.6 + model.speed) * _speedFactor * model.config.difficulty;
+      // Progressive spawn intensity increases over time
+      final minutes = model.elapsed / 60.0;
+      final spawnIntensity = 1.0 + minutes * 0.35; // up to ~2.75x at 5 min
+      model.spawnCooldown -= dt * (0.6 + model.speed) * _speedFactor * model.config.difficulty * spawnIntensity;
       if (model.spawnCooldown <= 0) {
-        model.spawnCooldown = (rng.nextDouble() * 1.2 + 0.8) / model.config.difficulty * (1.0 + model.safeStart * 0.08); // fewer during safe start
+        var base = (rng.nextDouble() * 1.2 + 0.8) / model.config.difficulty * (1.0 + model.safeStart * 0.08);
+        if (model.elapsed < 60.0) base *= 1.6; // fewer cars during first minute
+        base /= spawnIntensity;
+        model.spawnCooldown = base;
         int lane = rng.nextInt(3) - 1; // -1,0,1
         // Avoid player's lane often
         final playerLane = (model.player.x.abs() < 0.25) ? 0 : (model.player.x.isNegative ? -1 : 1);
@@ -330,9 +346,13 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
         }
       }
       // Hazards spawn
-      model.hazardCooldown -= dt * (0.35 + model.speed * 0.6) * _speedFactor * model.config.difficulty;
+      final hazardIntensity = 1.0 + minutes * 0.30;
+      model.hazardCooldown -= dt * (0.35 + model.speed * 0.6) * _speedFactor * model.config.difficulty * hazardIntensity;
       if (model.hazardCooldown <= 0) {
-        model.hazardCooldown = (rng.nextDouble() * 3.4 + 1.6) / model.config.difficulty; // less frequent
+        var base = (rng.nextDouble() * 3.4 + 1.6) / model.config.difficulty;
+        if (model.elapsed < 60.0) base *= 1.4; // fewer hazards in first minute
+        base /= hazardIntensity;
+        model.hazardCooldown = base; // less frequent initially, more as time passes
         int laneIndex = rng.nextInt(3) - 1;
         final playerLane = (model.player.x.abs() < 0.25) ? 0 : (model.player.x.isNegative ? -1 : 1);
         if (laneIndex == playerLane && rng.nextBool()) {
