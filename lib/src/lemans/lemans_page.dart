@@ -652,7 +652,7 @@ class _LeMansPainter extends CustomPainter {
     // Player car
     // Player car (flash when invulnerable)
     final pBody = _dim(const Color(0xFF7EB7FF));
-    _drawCar(canvas, model.player.toRect(road), body: pBody);
+    _drawCar(canvas, model.player.toRect(road), body: pBody, tailLights: true, headLights: true);
     if (model.invuln > 0) {
       final flash = (math.sin(model.scroll * 0.1) > 0) ? 160 : 0;
       if (flash > 0) {
@@ -660,14 +660,14 @@ class _LeMansPainter extends CustomPainter {
       }
     }
 
-    // HUD
-    _drawHud(canvas, size);
-
     // Headlights mask at night
     if (model.night > 0.4) {
       final darkness = (model.night - 0.4) / 0.6; // 0..1
       _drawHeadlights(canvas, size, darkness);
     }
+
+    // HUD (drawn after darkness overlay so it remains bright)
+    _drawHud(canvas, size);
   }
 
   void _drawHatch(Canvas canvas, Rect r) {
@@ -750,7 +750,7 @@ class _LeMansPainter extends CustomPainter {
     }
   }
 
-  void _drawCar(Canvas canvas, Rect r, {required Color body, bool tailLights = false}) {
+  void _drawCar(Canvas canvas, Rect r, {required Color body, bool tailLights = false, bool headLights = false}) {
     final car = RRect.fromRectAndRadius(r, const Radius.circular(3));
     canvas.drawRRect(car, Paint()..color = body);
     // windshield / details
@@ -777,6 +777,22 @@ class _LeMansPainter extends CustomPainter {
         ..color = const Color.fromARGB(150, 255, 0, 0)
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
       final core = Paint()..color = const Color(0xFFFF3030);
+      canvas.drawRect(left.inflate(2), glow);
+      canvas.drawRect(right.inflate(2), glow);
+      canvas.drawRect(left, core);
+      canvas.drawRect(right, core);
+    }
+    // front headlights for player (white)
+    if (headLights) {
+      final hlW = r.width * 0.14;
+      final hlH = r.height * 0.09;
+      final y = r.top + r.height * 0.08;
+      final left = Rect.fromLTWH(r.left + r.width * 0.12, y, hlW, hlH);
+      final right = Rect.fromLTWH(r.right - r.width * 0.12 - hlW, y, hlW, hlH);
+      final glow = Paint()
+        ..color = const Color.fromARGB(140, 255, 255, 255)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
+      final core = Paint()..color = const Color(0xFFFFFFFF);
       canvas.drawRect(left.inflate(2), glow);
       canvas.drawRect(right.inflate(2), glow);
       canvas.drawRect(left, core);
