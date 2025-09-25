@@ -19,6 +19,7 @@ class _Car {
   double h; // height in logical units
   double prevY = 0.0;
   bool passed = false;
+  bool overtake = false; // special flag for post-game occasional passers
   _Car(this.x, this.y, this.w, this.h);
   Rect toRect(Rect road) {
     final cx = road.center.dx + x * (road.width * _kLaneXFactor);
@@ -73,6 +74,8 @@ class _GameModel {
   double roadWidthFactor = 0.86; // portion of screen width
   double roadWidthTarget = 0.86;
   double roadWidthChangeTimer = 3.0;
+  // Post-game occasional overtake timer
+  double overtakeCooldown = 0.0;
 }
 
 class _Skid {
@@ -149,6 +152,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
     model.roadWidthFactor = 0.86;
     model.roadWidthTarget = 0.86;
     model.roadWidthChangeTimer = 3.0;
+    model.overtakeCooldown = 0.0;
   }
 
   void _onTick(Duration elapsed) {
@@ -205,6 +209,22 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
       case _GameState.gameOver:
         model.speed = model.speed * 0.98; // gentle roll-down
         if (model.speed < 0.003) model.speed = 0.0; // fully stop
+        // Occasionally spawn an overtake car when fully stopped
+        if (model.speed == 0.0) {
+          model.overtakeCooldown -= dt;
+          if (model.overtakeCooldown <= 0) {
+            model.overtakeCooldown = rng.nextDouble() * 3.0 + 2.0; // ~2..5s
+            int laneIndex = rng.nextInt(3) - 1;
+            final playerLane = (model.player.x.abs() < 0.25) ? 0 : (model.player.x.isNegative ? -1 : 1);
+            if (laneIndex == playerLane) {
+              laneIndex = (laneIndex == 1 ? 0 : laneIndex + 1);
+            }
+            final lane = (laneIndex * 0.5).toDouble();
+            final oc = _Car(lane, 1.05, 0.10, 0.18);
+            oc.overtake = true;
+            model.traffic.add(oc);
+          }
+        }
         break;
     }
 
@@ -321,7 +341,14 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
     // Move traffic toward player; remove offscreen and add score
     for (final c in model.traffic) {
       c.prevY = c.y;
-      c.y -= dt * (0.7 + 2.3 * model.speed) * _speedFactor; // slightly slower closing speed
+      double v = (0.7 + 2.3 * model.speed) * _speedFactor; // default flow
+      if (model.state == _GameState.gameOver && model.speed == 0.0 && !c.overtake) {
+        v = 0.0; // freeze normal traffic when fully stopped at game over
+      }
+      if (c.overtake) {
+        v = 0.9 * _speedFactor; // steady overtake pace independent of player speed
+      }
+      c.y -= dt * v;
       if (!c.passed && c.y <= model.player.y + 0.02) {
         c.passed = true;
         if ((c.x - model.player.x).abs() < 0.22) {
@@ -331,13 +358,15 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
     }
     model.traffic.removeWhere((c) {
       if (c.y < -0.3) {
-        model.combo += 1; model.comboTimer = 2.0;
-        final base = 10 * math.max(1, model.combo ~/ 3);
-        model.score += (base * model.multiplier).round();
-        model.passed += 1;
-        if (model.passed % 5 == 0 && model.state == _GameState.running) {
-          model.timeLeft = math.min(99, model.timeLeft + 1.0); // small reward
-          audio.beep(660, 80);
+        if (model.state == _GameState.running) {
+          model.combo += 1; model.comboTimer = 2.0;
+          final base = 10 * math.max(1, model.combo ~/ 3);
+          model.score += (base * model.multiplier).round();
+          model.passed += 1;
+          if (model.passed % 5 == 0) {
+            model.timeLeft = math.min(99, model.timeLeft + 1.0); // small reward
+            audio.beep(660, 80);
+          }
         }
         return true;
       }
@@ -346,64 +375,65 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
 
     _clampPlayer();
 
-    // Collisions
+    // Collisions (only while running)
     final pRect = model.player.toRect(road);
-    // Hazards move
+    // Hazards and pickups keep drifting, but disable effects if not running
     for (final h in model.hazards) {
       h.y -= dt * (0.7 + 2.4 * model.speed) * _speedFactor;
     }
     model.hazards.removeWhere((h) => h.y < -0.2);
-    // Pickups move
     for (final p in model.pickups) {
       p.y -= dt * (0.7 + 2.4 * model.speed) * _speedFactor;
     }
     model.pickups.removeWhere((p) => p.y < -0.2);
-    for (final h in model.hazards) {
-      if (model.invuln <= 0 && h.toRect(road).deflate(road.width * 0.02).overlaps(pRect.deflate(road.width * 0.02))) {
-        if (h.type == _HazardType.oil) {
-          // brief slip effect
-          model.player.x += (rng.nextDouble() - 0.5) * 0.3;
-          model.speed = math.max(0.3, model.speed * 0.6);
-          audio.beep(220, 90);
-          model.shake = 0.2;
-          // Drop quick skid marks at tires
-          final pr = model.player.toRect(road);
-          final l = Offset(pr.left + pr.width*0.05, pr.bottom - pr.height*0.2);
-          final r = Offset(pr.right - pr.width*0.05, pr.bottom - pr.height*0.2);
-          model.skids.add(_Skid(l.translate(-6, -2), l.translate(6, 2), 0.6));
-          model.skids.add(_Skid(r.translate(-6, -2), r.translate(6, 2), 0.6));
-        } else {
-          // puddle slows down a bit and darkens screen briefly
-          model.speed = math.max(0.25, model.speed * 0.7);
-          audio.beep(300, 80);
-          model.shake = 0.15;
-        }
-        model.invuln = 1.0; // grace window to avoid chain hits
-        model.risk = 0.0; model.multiplier = 1.0; // reset multiplier on hit
-        // Lose a life when hitting a hazard
-        model.lives = math.max(0, model.lives - 1);
-        if (model.lives <= 0) {
-          model.state = _GameState.gameOver;
-          model.hiScore = math.max(model.hiScore, model.score);
+
+    if (model.state == _GameState.running) {
+      for (final h in model.hazards) {
+        if (model.invuln <= 0 && h.toRect(road).deflate(road.width * 0.02).overlaps(pRect.deflate(road.width * 0.02))) {
+          if (h.type == _HazardType.oil) {
+            // brief slip effect
+            model.player.x += (rng.nextDouble() - 0.5) * 0.3;
+            model.speed = math.max(0.3, model.speed * 0.6);
+            audio.beep(220, 90);
+            model.shake = 0.2;
+            // Drop quick skid marks at tires
+            final pr = model.player.toRect(road);
+            final l = Offset(pr.left + pr.width*0.05, pr.bottom - pr.height*0.2);
+            final r = Offset(pr.right - pr.width*0.05, pr.bottom - pr.height*0.2);
+            model.skids.add(_Skid(l.translate(-6, -2), l.translate(6, 2), 0.6));
+            model.skids.add(_Skid(r.translate(-6, -2), r.translate(6, 2), 0.6));
+          } else {
+            // puddle slows down a bit and darkens screen briefly
+            model.speed = math.max(0.25, model.speed * 0.7);
+            audio.beep(300, 80);
+            model.shake = 0.15;
+          }
+          model.invuln = 1.0; // grace window to avoid chain hits
+          model.risk = 0.0; model.multiplier = 1.0; // reset multiplier on hit
+          // Lose a life when hitting a hazard
+          model.lives = math.max(0, model.lives - 1);
+          if (model.lives <= 0) {
+            model.state = _GameState.gameOver;
+            model.hiScore = math.max(model.hiScore, model.score);
+          }
         }
       }
-    }
-    for (final p in model.pickups) {
-      if (p.toRect(road).overlaps(pRect)) {
-        switch (p.type) {
-          case _PickupType.fuel:
-            model.fuel = math.min(100.0, model.fuel + 25);
-            model.score += 50;
-            audio.beep(880, 70);
-            audio.beep(660, 70);
-            break;
+      for (final p in model.pickups) {
+        if (p.toRect(road).overlaps(pRect)) {
+          switch (p.type) {
+            case _PickupType.fuel:
+              model.fuel = math.min(100.0, model.fuel + 25);
+              model.score += 50;
+              audio.beep(880, 70);
+              audio.beep(660, 70);
+              break;
+          }
+          p.y = -1; // mark for removal
         }
-        p.y = -1; // mark for removal
       }
-    }
-    model.pickups.removeWhere((p) => p.y < 0);
-    for (final car in model.traffic) {
-      if (model.invuln <= 0 && car.toRect(road).deflate(road.width * 0.02).overlaps(pRect.deflate(road.width * 0.02))) {
+      model.pickups.removeWhere((p) => p.y < 0);
+      for (final car in model.traffic) {
+        if (model.invuln <= 0 && car.toRect(road).deflate(road.width * 0.02).overlaps(pRect.deflate(road.width * 0.02))) {
         // Simple collision penalty
         model.speed = 0.2;
         model.timeLeft = math.max(0, model.timeLeft - 3.0);
@@ -418,29 +448,29 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
           model.hiScore = math.max(model.hiScore, model.score);
         }
         break;
+        }
       }
-    }
-
-    // Side collisions with road edges
-    final driveLeft = road.left + road.width * 0.08;
-    final driveRight = road.right - road.width * 0.08;
-    if (model.invuln <= 0 && (pRect.left < driveLeft || pRect.right > driveRight)) {
-      model.speed = math.max(0.25, model.speed * 0.6);
-      model.timeLeft = math.max(0, model.timeLeft - 1.0);
-      audio.beep(180, 100);
-      model.shake = 0.2;
-      model.invuln = 0.5;
-      // Nudge back onto road
-      if (pRect.left < driveLeft) {
-        model.player.x += 0.08;
-      } else {
-        model.player.x -= 0.08;
-      }
-      // Lose a life on hard edge impact
-      model.lives = math.max(0, model.lives - 1);
-      if (model.lives <= 0) {
-        model.state = _GameState.gameOver;
-        model.hiScore = math.max(model.hiScore, model.score);
+      // Side collisions with road edges
+      final driveLeft = road.left + road.width * 0.08;
+      final driveRight = road.right - road.width * 0.08;
+      if (model.invuln <= 0 && (pRect.left < driveLeft || pRect.right > driveRight)) {
+        model.speed = math.max(0.25, model.speed * 0.6);
+        model.timeLeft = math.max(0, model.timeLeft - 1.0);
+        audio.beep(180, 100);
+        model.shake = 0.2;
+        model.invuln = 0.5;
+        // Nudge back onto road
+        if (pRect.left < driveLeft) {
+          model.player.x += 0.08;
+        } else {
+          model.player.x -= 0.08;
+        }
+        // Lose a life on hard edge impact
+        model.lives = math.max(0, model.lives - 1);
+        if (model.lives <= 0) {
+          model.state = _GameState.gameOver;
+          model.hiScore = math.max(model.hiScore, model.score);
+        }
       }
     }
 
