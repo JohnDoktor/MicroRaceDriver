@@ -202,7 +202,8 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
         // no simulation while paused
         break;
       case _GameState.gameOver:
-        model.speed = model.speed * 0.98;
+        model.speed = model.speed * 0.98; // gentle roll-down
+        if (model.speed < 0.003) model.speed = 0.0; // fully stop
         break;
     }
 
@@ -754,7 +755,8 @@ class _LeMansPainter extends CustomPainter {
       final col = i < filled ? _dim(C64Palette.cyan) : _dim(C64Palette.cyan, 0.15);
       canvas.drawRRect(r, Paint()..color = col);
     }
-    final kmh = (40 + model.speed * 120).round();
+    final baseMin = model.state == _GameState.gameOver ? 0 : 40; // allow 0 at game over
+    final kmh = (baseMin + model.speed * 120).round();
     text('   $kmh KM/H', C64Palette.white, y + h + 6);
 
     if (model.state == _GameState.gameOver) {
