@@ -362,10 +362,13 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
         final type = rng.nextBool() ? _HazardType.oil : _HazardType.puddle;
         model.hazards.add(_Hazard(type, lane, 1.05));
       }
-      // Fuel pickups spawn more rarely
-      model.pickupCooldown -= dt * (0.25 + model.speed * 0.5) * _speedFactor;
+      // Fuel pickups: spawn more frequently overall, and slightly more over time
+      final pickupIntensity = 1.0 + minutes * 0.20; // modest ramp
+      model.pickupCooldown -= dt * (0.35 + model.speed * 0.7) * _speedFactor * pickupIntensity;
       if (model.pickupCooldown <= 0) {
-        model.pickupCooldown = rng.nextDouble() * 5.0 + 6.0; // ~6..11s
+        var base = rng.nextDouble() * 3.0 + 3.0; // ~3..6s
+        base /= pickupIntensity;
+        model.pickupCooldown = base;
         final lane = (rng.nextInt(3) - 1) * 0.5;
         model.pickups.add(_Pickup(_PickupType.fuel, lane.toDouble(), 1.05));
       }
@@ -877,8 +880,8 @@ class _LeMansPainter extends CustomPainter {
   }
 
   void _drawHud(Canvas canvas, Size size) {
-    // Lives (top-left) — three car icons like old arcade machines
-    _drawLives(canvas, size);
+    // Top-left: Hi-Score and lives
+    _drawTopLeftHud(canvas, size);
 
     final right = size.width - 14.0;
     final x = right - 120.0;
@@ -896,11 +899,25 @@ class _LeMansPainter extends CustomPainter {
     }
     double y = top;
     y += text('SCORE  ${model.score}', C64Palette.white, y) + 6;
-    y += text('TIME   ${model.timeLeft.ceil()}', C64Palette.green, y) + 6;
-    y += text('LIVES  ${model.lives}', C64Palette.purple, y) + 6;
-    y += text('FUEL   ${model.fuel.round()}%', C64Palette.white, y) + 6;
-    y += text('HI-SCORE ${model.hiScore}', C64Palette.green, y) + 10;
-    y += text('MULT   x${model.multiplier.toStringAsFixed(1)}', C64Palette.cyan, y) + 10;
+    y += text('TIME   ${model.timeLeft.ceil()}', C64Palette.green, y) + 10;
+    // Fuel bar
+    y += text('FUEL', C64Palette.white, y) + 6;
+    final barW = 110.0, barH = 12.0;
+    final pct = (model.fuel.clamp(0, 100)) / 100.0;
+    final bg = Paint()..color = C64Palette.darkGray;
+    Color fuelColor;
+    if (pct > 0.5) {
+      fuelColor = C64Palette.green;
+    } else if (pct > 0.25) {
+      fuelColor = C64Palette.amber;
+    } else {
+      fuelColor = const Color(0xFFFF5555);
+    }
+    final fg = Paint()..color = fuelColor;
+    final barRect = Rect.fromLTWH(x, y, barW, barH);
+    canvas.drawRRect(RRect.fromRectAndRadius(barRect, const Radius.circular(3)), bg);
+    canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(x, y, barW * pct, barH), const Radius.circular(3)), fg);
+    y += barH + 10;
     y += text('SPEED', C64Palette.white, y) + 4;
     // speed meter boxes (3)
     final boxes = 3;
@@ -931,6 +948,22 @@ class _LeMansPainter extends CustomPainter {
     }
     // Hazard/traffic warnings: small arrows if something is close ahead
     _drawWarnings(canvas, size);
+  }
+
+  void _drawTopLeftHud(Canvas canvas, Size size) {
+    // Hi-Score text
+    final leftX = 14.0;
+    final topY = 16.0;
+    final tp = TextPainter(
+      text: TextSpan(
+        text: 'HI-SCORE  ${model.hiScore}',
+        style: const TextStyle(fontFamily: 'VT323', fontSize: 18, fontWeight: FontWeight.w700, color: C64Palette.green),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: size.width * 0.5);
+    tp.paint(canvas, Offset(leftX, topY));
+    // Lives (top-left) — three car icons like old arcade machines
+    _drawLives(canvas, size);
   }
 
   void _drawLives(Canvas canvas, Size size) {
