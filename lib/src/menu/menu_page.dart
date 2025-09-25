@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:math';
 // unused audio test imports removed
 import '../config.dart';
 import '../lemans/lemans_page.dart';
@@ -10,9 +11,25 @@ class MenuPage extends StatefulWidget {
   State<MenuPage> createState() => _MenuPageState();
 }
 
-class _MenuPageState extends State<MenuPage> {
+class _MenuPageState extends State<MenuPage> with SingleTickerProviderStateMixin {
   bool _musicEnabled = true;
   bool _sfxEnabled = true;
+  late final AnimationController _parallaxCtl;
+  late final AnimationController _fadeCtl;
+
+  @override
+  void initState() {
+    super.initState();
+    _parallaxCtl = AnimationController(vsync: this, duration: const Duration(seconds: 20))..repeat();
+    _fadeCtl = AnimationController(vsync: this, duration: const Duration(milliseconds: 900))..forward();
+  }
+
+  @override
+  void dispose() {
+    _parallaxCtl.dispose();
+    _fadeCtl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -23,13 +40,27 @@ class _MenuPageState extends State<MenuPage> {
           children: [
             // Background image (80s cassette-style art). Place your file at assets/images/menu_bg.png
             Positioned.fill(
-              child: Image.asset(
-                'assets/images/menu_bg.png',
-                fit: BoxFit.cover,
-                filterQuality: FilterQuality.high,
-                errorBuilder: (context, error, stack) {
-                  // Fallback to painter if asset is missing
-                  return CustomPaint(painter: _CassetteArtPainter());
+              child: AnimatedBuilder(
+                animation: _parallaxCtl,
+                builder: (context, child) {
+                  final t = _parallaxCtl.value * 2 * 3.1415926535; // 0..2π
+                  final dx = 12.0 * (0.6 * sin(t) + 0.4 * sin(2*t));
+                  final dy = 8.0 * (0.5 * cos(t) + 0.5 * sin(1.3*t));
+                  return Transform.translate(
+                    offset: Offset(dx, dy),
+                    child: FadeTransition(
+                      opacity: CurvedAnimation(parent: _fadeCtl, curve: Curves.easeOut),
+                      child: Image.asset(
+                        'assets/images/menu_bg.png',
+                        fit: BoxFit.cover,
+                        filterQuality: FilterQuality.high,
+                        errorBuilder: (context, error, stack) {
+                          // Fallback to painter if asset is missing
+                          return CustomPaint(painter: _CassetteArtPainter());
+                        },
+                      ),
+                    ),
+                  );
                 },
               ),
             ),
