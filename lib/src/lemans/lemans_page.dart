@@ -1269,7 +1269,7 @@ class _Music {
     if (_started) return;
     final bytes = _makeLoop();
     await _p.setReleaseMode(ReleaseMode.loop);
-    await _p.setVolume(0.2);
+    await _p.setVolume(0.35);
     await _p.play(BytesSource(bytes));
     _started = true;
   }

@@ -1,10 +1,25 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:audioplayers/audioplayers.dart';
 
 import 'src/menu/menu_page.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Configure global audio context to ensure playback works even with the silent switch on iOS
+  await AudioPlayer.global.setAudioContext(AudioContext(
+    iOS: const AudioContextIOS(
+      category: AVAudioSessionCategory.playback,
+      options: [],
+    ),
+    android: const AudioContextAndroid(
+      contentType: AndroidContentType.music,
+      usageType: AndroidUsageType.media,
+      audioFocus: AndroidAudioFocus.gain,
+      isSpeakerphoneOn: false,
+      stayAwake: false,
+    ),
+  ));
   SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
   runApp(const RaceDriverApp());
 }
