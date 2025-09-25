@@ -229,10 +229,11 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
         break;
     }
 
-    // Apply button input steering
+    // Apply button input steering (faster; disabled at 0 speed)
     final steer = (model.rightPressed ? 1.0 : 0.0) - (model.leftPressed ? 1.0 : 0.0);
-    if (steer != 0) {
-      model.player.x = (model.player.x + steer * dt * 0.55).clamp(-1.0, 1.0);
+    if (steer != 0 && model.speed > 0.0) {
+      const double steerSpeed = 0.55 * 3.0; // 3x faster
+      model.player.x = (model.player.x + steer * dt * steerSpeed).clamp(-1.0, 1.0);
     }
 
     // Scroll road relative to perceived forward speed.
