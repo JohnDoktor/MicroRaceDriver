@@ -204,7 +204,6 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
       case _GameState.running:
         // target speed ramps to 1.0
         model.speed = (model.speed + dt * 0.25 / model.config.difficulty).clamp(0.0, 1.0);
-        model.timeLeft -= dt;
         model.elapsed += dt; // accumulate runtime for progressive difficulty
         // Fuel consumption scales with speed and difficulty
         model.fuel -= dt * (0.5 + model.speed * 1.2) * model.config.difficulty;
@@ -212,11 +211,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
         // Build risk over time -> increases score multiplier
         model.risk += dt * (0.3 + 0.7 * model.speed);
         model.multiplier = (1.0 + (model.risk / 8.0).clamp(0.0, 2.0)); // 1..3x
-        if (model.timeLeft <= 0) {
-          model.timeLeft = 0;
-          model.state = _GameState.gameOver;
-          model.hiScore = math.max(model.hiScore, model.score);
-        }
+        // No countdown timer; game ends only when lives reach 0
         break;
       case _GameState.paused:
         // no simulation while paused
@@ -428,10 +423,6 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
           final base = 10 * math.max(1, model.combo ~/ 3);
           model.score += (base * model.multiplier).round();
           model.passed += 1;
-          if (model.passed % 5 == 0) {
-            model.timeLeft = math.min(99, model.timeLeft + 1.0); // small reward
-            audio.beep(660, 80);
-          }
         }
         return true;
       }
@@ -512,7 +503,6 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
       if (model.invuln <= 0 && car.toRect(road, baseW).deflate(baseW * 0.02).overlaps(pRect.deflate(baseW * 0.02))) {
         // Simple collision penalty
         model.speed = 0.2;
-        model.timeLeft = math.max(0, model.timeLeft - 3.0);
         audio.beep(120, 120);
         model.shake = 0.25;
         model.invuln = 1.0;
@@ -530,11 +520,10 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
       final driveLeft = road.left + road.width * 0.08;
       final driveRight = road.right - road.width * 0.08;
       if (model.invuln <= 0 && (pRect.left < driveLeft || pRect.right > driveRight)) {
-        model.speed = math.max(0.25, model.speed * 0.6);
-        model.timeLeft = math.max(0, model.timeLeft - 1.0);
-        audio.beep(180, 100);
-        model.shake = 0.2;
-        model.invuln = 0.5;
+      model.speed = math.max(0.25, model.speed * 0.6);
+      audio.beep(180, 100);
+      model.shake = 0.2;
+      model.invuln = 0.5;
         // Nudge back onto road
         if (pRect.left < driveLeft) {
           model.player.x += 0.08;
@@ -930,8 +919,7 @@ class _LeMansPainter extends CustomPainter {
       return tp.height;
     }
     double y = top;
-    y += text('SCORE  ${model.score}', C64Palette.white, y) + 6;
-    y += text('TIME   ${model.timeLeft.ceil()}', C64Palette.green, y) + 10;
+    y += text('SCORE  ${model.score}', C64Palette.white, y) + 10;
     // Fuel bar
     y += text('FUEL', C64Palette.white, y) + 6;
     final barW = 110.0, barH = 12.0;
