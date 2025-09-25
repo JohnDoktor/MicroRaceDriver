@@ -343,7 +343,10 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
     // Move traffic toward player; remove offscreen and add score
     for (final c in model.traffic) {
       c.prevY = c.y;
-      double v = (0.7 + 2.3 * model.speed) * _speedFactor; // default flow (downward)
+      // Base ground flow (matches road movement speed)
+      final baseFlow = (2.8 * model.speed) * _speedFactor;
+      // AI traffic should appear to drive forward, but slower than player → move slower than ground
+      double v = baseFlow * 0.7; // ~70% of ground speed
       if (model.state == _GameState.gameOver && model.speed == 0.0 && !c.overtake) {
         v = 0.0; // freeze normal traffic when fully stopped at game over
       }
@@ -388,13 +391,14 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
 
     // Collisions (only while running)
     final pRect = model.player.toRect(road);
-    // Hazards and pickups keep drifting, but disable effects if not running
+    // Hazards and pickups move with the ground speed (same as road flow)
+    final groundFlow = (2.8 * model.speed) * _speedFactor;
     for (final h in model.hazards) {
-      h.y -= dt * (0.7 + 2.4 * model.speed) * _speedFactor;
+      h.y -= dt * groundFlow;
     }
     model.hazards.removeWhere((h) => h.y < -0.2);
     for (final p in model.pickups) {
-      p.y -= dt * (0.7 + 2.4 * model.speed) * _speedFactor;
+      p.y -= dt * groundFlow;
     }
     model.pickups.removeWhere((p) => p.y < -0.2);
 
