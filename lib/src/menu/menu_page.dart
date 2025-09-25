@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:math';
+import 'package:flutter/services.dart' show rootBundle;
 // unused audio test imports removed
 import '../config.dart';
 import '../lemans/lemans_page.dart';
@@ -16,12 +17,14 @@ class _MenuPageState extends State<MenuPage> with SingleTickerProviderStateMixin
   bool _sfxEnabled = true;
   late final AnimationController _parallaxCtl;
   late final AnimationController _fadeCtl;
+  late final Future<String?> _bgFuture;
 
   @override
   void initState() {
     super.initState();
     _parallaxCtl = AnimationController(vsync: this, duration: const Duration(seconds: 20))..repeat();
     _fadeCtl = AnimationController(vsync: this, duration: const Duration(milliseconds: 900))..forward();
+    _bgFuture = _pickBackgroundAsset();
   }
 
   @override
@@ -29,6 +32,24 @@ class _MenuPageState extends State<MenuPage> with SingleTickerProviderStateMixin
     _parallaxCtl.dispose();
     _fadeCtl.dispose();
     super.dispose();
+  }
+
+  Future<String?> _pickBackgroundAsset() async {
+    const candidates = <String>[
+      'assets/images/menu_bg.png',
+      'assets/images/menu_bg.jpg',
+      'assets/images/background.png',
+      'assets/images/background.jpg',
+      'assets/images/bg.png',
+      'assets/images/bg.jpg',
+    ];
+    for (final p in candidates) {
+      try {
+        await rootBundle.load(p);
+        return p;
+      } catch (_) {}
+    }
+    return null;
   }
 
   @override
@@ -40,26 +61,37 @@ class _MenuPageState extends State<MenuPage> with SingleTickerProviderStateMixin
           children: [
             // Background image (80s cassette-style art). Place your file at assets/images/menu_bg.png
             Positioned.fill(
-              child: AnimatedBuilder(
-                animation: _parallaxCtl,
-                builder: (context, child) {
-                  final t = _parallaxCtl.value * 2 * 3.1415926535; // 0..2π
-                  final dx = 12.0 * (0.6 * sin(t) + 0.4 * sin(2*t));
-                  final dy = 8.0 * (0.5 * cos(t) + 0.5 * sin(1.3*t));
-                  return Transform.translate(
-                    offset: Offset(dx, dy),
-                    child: FadeTransition(
-                      opacity: CurvedAnimation(parent: _fadeCtl, curve: Curves.easeOut),
-                      child: Image.asset(
-                        'assets/images/menu_bg.png',
-                        fit: BoxFit.cover,
-                        filterQuality: FilterQuality.high,
-                        errorBuilder: (context, error, stack) {
-                          // Fallback to painter if asset is missing
-                          return CustomPaint(painter: _CassetteArtPainter());
-                        },
-                      ),
-                    ),
+              child: FutureBuilder<String?>(
+                future: _bgFuture,
+                builder: (context, snap) {
+                  if (snap.connectionState != ConnectionState.done) {
+                    return const SizedBox.shrink();
+                  }
+                  final path = snap.data;
+                  Widget child;
+                  if (path == null) {
+                    child = CustomPaint(painter: _CassetteArtPainter());
+                  } else {
+                    child = Image.asset(
+                      path,
+                      fit: BoxFit.cover,
+                      filterQuality: FilterQuality.high,
+                    );
+                  }
+                  return AnimatedBuilder(
+                    animation: _parallaxCtl,
+                    builder: (context, _) {
+                      final t = _parallaxCtl.value * 2 * 3.1415926535; // 0..2π
+                      final dx = 12.0 * (0.6 * sin(t) + 0.4 * sin(2*t));
+                      final dy = 8.0 * (0.5 * cos(t) + 0.5 * sin(1.3*t));
+                      return Transform.translate(
+                        offset: Offset(dx, dy),
+                        child: FadeTransition(
+                          opacity: CurvedAnimation(parent: _fadeCtl, curve: Curves.easeOut),
+                          child: child,
+                        ),
+                      );
+                    },
                   );
                 },
               ),
