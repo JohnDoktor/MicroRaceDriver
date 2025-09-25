@@ -12,7 +12,7 @@ class MenuPage extends StatefulWidget {
   State<MenuPage> createState() => _MenuPageState();
 }
 
-class _MenuPageState extends State<MenuPage> with SingleTickerProviderStateMixin {
+class _MenuPageState extends State<MenuPage> with TickerProviderStateMixin {
   bool _musicEnabled = true;
   bool _sfxEnabled = true;
   late final AnimationController _parallaxCtl;
