@@ -678,16 +678,16 @@ class _LeMansPainter extends CustomPainter {
     if (n <= 0.0) return;
     final glow = Paint()
       ..blendMode = BlendMode.screen
-      ..color = Color.fromARGB((90 + 80 * n).round(), 255, 40, 40)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
+      ..color = Color.fromARGB((160 + 80 * n).round(), 255, 70, 70)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 12);
     void drawFor(Rect r) {
       final tlW = r.width * 0.16;
       final tlH = r.height * 0.10;
       final y = r.bottom - tlH - r.height * 0.06;
       final left = Rect.fromLTWH(r.left + r.width * 0.08, y, tlW, tlH);
       final right = Rect.fromLTWH(r.right - r.width * 0.08 - tlW, y, tlW, tlH);
-      canvas.drawRect(left.inflate(3), glow);
-      canvas.drawRect(right.inflate(3), glow);
+      canvas.drawRect(left.inflate(5), glow);
+      canvas.drawRect(right.inflate(5), glow);
     }
     // Traffic
     for (final c in model.traffic) {
@@ -808,11 +808,11 @@ class _LeMansPainter extends CustomPainter {
         canvas.drawRect(right, lens);
       } else {
         final glow = Paint()
-          ..color = Color.fromARGB((110 + 70 * n).round(), 255, 0, 0)
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
-        final core = Paint()..color = const Color(0xFFFF3030);
-        canvas.drawRect(left.inflate(2), glow);
-        canvas.drawRect(right.inflate(2), glow);
+          ..color = Color.fromARGB((170 + 70 * n).round(), 255, 40, 40)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
+        final core = Paint()..color = const Color(0xFFFF4040);
+        canvas.drawRect(left.inflate(3), glow);
+        canvas.drawRect(right.inflate(3), glow);
         canvas.drawRect(left, core);
         canvas.drawRect(right, core);
       }
