@@ -755,8 +755,8 @@ class _LeMansPainter extends CustomPainter {
       final col = i < filled ? _dim(C64Palette.cyan) : _dim(C64Palette.cyan, 0.15);
       canvas.drawRRect(r, Paint()..color = col);
     }
-    final baseMin = model.state == _GameState.gameOver ? 0 : 40; // allow 0 at game over
-    final kmh = (baseMin + model.speed * 120).round();
+    // Show 0 KM/H regardless of state
+    final kmh = (model.speed * 120).round();
     text('   $kmh KM/H', C64Palette.white, y + h + 6);
 
     if (model.state == _GameState.gameOver) {
