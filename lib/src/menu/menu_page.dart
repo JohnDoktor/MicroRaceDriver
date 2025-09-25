@@ -21,13 +21,26 @@ class _MenuPageState extends State<MenuPage> {
       body: SafeArea(
         child: Stack(
           children: [
-            Positioned.fill(child: CustomPaint(painter: _CassetteArtPainter())),
+            // Background image (80s cassette-style art). Place your file at assets/images/menu_bg.png
+            Positioned.fill(
+              child: Image.asset(
+                'assets/images/menu_bg.png',
+                fit: BoxFit.cover,
+                filterQuality: FilterQuality.high,
+                errorBuilder: (context, error, stack) {
+                  // Fallback to painter if asset is missing
+                  return CustomPaint(painter: _CassetteArtPainter());
+                },
+              ),
+            ),
+            // Subtle dark overlay for readability
+            Positioned.fill(child: DecoratedBox(decoration: BoxDecoration(color: Colors.black.withOpacity(0.25)))),
             Center(
               child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Text('RaceDriver', style: TextStyle(fontFamily: 'VT323', fontSize: 48, color: Colors.white)),
-              const SizedBox(height: 8),
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Text('RaceDriver', style: TextStyle(fontFamily: 'VT323', fontSize: 48, color: Colors.white)),
+                  const SizedBox(height: 8),
               const Text('Le Mans style', style: TextStyle(fontFamily: 'VT323', fontSize: 20, color: Colors.white70)),
               const SizedBox(height: 32),
               // Controls selector hidden; difficulty removed
