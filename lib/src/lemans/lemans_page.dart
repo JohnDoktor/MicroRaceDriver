@@ -247,26 +247,9 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
         // no simulation while paused
         break;
       case _GameState.gameOver:
-        model.speed = model.speed * 0.98; // gentle roll-down
+        // Pause background simulation during continue screen
+        model.speed = 0.0;
         _music.stop();
-        if (model.speed < 0.003) model.speed = 0.0; // fully stop
-        // Occasionally spawn an overtake car when fully stopped
-        if (model.speed == 0.0) {
-          model.overtakeCooldown -= dt;
-          if (model.overtakeCooldown <= 0) {
-            model.overtakeCooldown = rng.nextDouble() * 3.0 + 2.0; // ~2..5s
-            int laneIndex = rng.nextInt(3) - 1;
-            final playerLane = (model.player.x.abs() < 0.25) ? 0 : (model.player.x.isNegative ? -1 : 1);
-            if (laneIndex == playerLane) {
-              laneIndex = (laneIndex == 1 ? 0 : laneIndex + 1);
-            }
-            final lane = (laneIndex * 0.5).toDouble();
-            // Spawn just below the bottom so it rises upward to overtake the player
-            final oc = _Car(lane, -0.12, 0.10, 0.18);
-            oc.overtake = true;
-            model.traffic.add(oc);
-          }
-        }
         break;
     }
 
@@ -417,64 +400,69 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
       if (model.comboTimer < 0) { model.comboTimer = 0; model.combo = 0; }
     }
 
-    // Move traffic toward player; remove offscreen and add score
-    for (final c in model.traffic) {
-      c.prevY = c.y;
-      // Base ground flow (matches road movement speed)
-      final baseFlow = (2.8 * model.speed) * _speedFactor;
-      // AI traffic should appear to drive forward, but slower than player → move slower than ground
-      double v = baseFlow * (c.speedScale.clamp(0.5, 0.9)); // randomized per car
-      if (model.state == _GameState.gameOver && model.speed == 0.0 && !c.overtake) {
-        v = 0.0; // freeze normal traffic when fully stopped at game over
-      }
-      if (c.overtake) {
-        v = -0.9 * _speedFactor; // negative makes it move upward (bottom -> top)
-      }
-      c.y -= dt * v;
-      // Mark pass and play whoosh when crossing the player's Y
-      if (!c.passed && !c.overtake && c.y <= model.player.y + 0.02) {
-        c.passed = true;
-        if ((c.x - model.player.x).abs() < 0.22) {
-          audio.whoosh();
+    // Move traffic toward player; remove offscreen and add score (only while running)
+    if (model.state == _GameState.running) {
+        for (final c in model.traffic) {
+          c.prevY = c.y;
+          // Base ground flow (matches road movement speed)
+          final baseFlow = (2.8 * model.speed) * _speedFactor;
+          // AI traffic should appear to drive forward, but slower than player → move slower than ground
+          double v = baseFlow * (c.speedScale.clamp(0.5, 0.9)); // randomized per car
+          if (model.state == _GameState.gameOver && model.speed == 0.0 && !c.overtake) {
+            v = 0.0; // freeze normal traffic when fully stopped at game over
+          }
+          if (c.overtake) {
+            v = -0.9 * _speedFactor; // negative makes it move upward (bottom -> top)
+          }
+          c.y -= dt * v;
+          // Mark pass and play whoosh when crossing the player's Y
+          if (!c.passed && !c.overtake && c.y <= model.player.y + 0.02) {
+            c.passed = true;
+            if ((c.x - model.player.x).abs() < 0.22) {
+              audio.whoosh();
+            }
+          }
+          if (!c.passed && c.overtake && c.y >= model.player.y - 0.02) {
+            c.passed = true;
+            if ((c.x - model.player.x).abs() < 0.22) {
+              audio.whoosh();
+            }
+          }
         }
-      }
-      if (!c.passed && c.overtake && c.y >= model.player.y - 0.02) {
-        c.passed = true;
-        if ((c.x - model.player.x).abs() < 0.22) {
-          audio.whoosh();
-        }
-      }
+        model.traffic.removeWhere((c) {
+          // Remove offscreen: normal traffic when it goes below bottom, overtake when it exits above top
+          final offscreen = c.overtake ? (c.y > 1.3) : (c.y < -0.3);
+          if (offscreen) {
+            if (model.state == _GameState.running) {
+              model.combo += 1; model.comboTimer = 2.0;
+              final base = 10 * math.max(1, model.combo ~/ 3);
+              model.score += (base * model.multiplier).round();
+              model.passed += 1;
+            }
+            return true;
+          }
+          return false;
+        });
+    
     }
-    model.traffic.removeWhere((c) {
-      // Remove offscreen: normal traffic when it goes below bottom, overtake when it exits above top
-      final offscreen = c.overtake ? (c.y > 1.3) : (c.y < -0.3);
-      if (offscreen) {
-        if (model.state == _GameState.running) {
-          model.combo += 1; model.comboTimer = 2.0;
-          final base = 10 * math.max(1, model.combo ~/ 3);
-          model.score += (base * model.multiplier).round();
-          model.passed += 1;
-        }
-        return true;
-      }
-      return false;
-    });
-
+    
     _clampPlayer();
 
     // Collisions (only while running)
     final baseW = model.refRoadWidth > 0 ? model.refRoadWidth : road.width;
     final pRect = model.player.toRect(road, baseW);
-    // Hazards and pickups move with the ground speed (same as road flow)
-    final groundFlow = (2.8 * model.speed) * _speedFactor;
-    for (final h in model.hazards) {
-      h.y -= dt * groundFlow;
+    // Hazards and pickups move only while running
+    if (model.state == _GameState.running) {
+      final groundFlow = (2.8 * model.speed) * _speedFactor;
+      for (final h in model.hazards) {
+        h.y -= dt * groundFlow;
+      }
+      model.hazards.removeWhere((h) => h.y < -0.2);
+      for (final p in model.pickups) {
+        p.y -= dt * groundFlow;
+      }
+      model.pickups.removeWhere((p) => p.y < -0.2);
     }
-    model.hazards.removeWhere((h) => h.y < -0.2);
-    for (final p in model.pickups) {
-      p.y -= dt * groundFlow;
-    }
-    model.pickups.removeWhere((p) => p.y < -0.2);
 
     if (model.state == _GameState.running) {
       for (final h in model.hazards) {
