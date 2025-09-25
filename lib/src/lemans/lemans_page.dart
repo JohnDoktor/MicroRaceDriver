@@ -175,7 +175,8 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
         if (current < previous && current > 0) {
           audio.beep(440, 90);
         }
-        model.speed = model.speed * 0.98 + 0.02 * 0.2; // slow idle scroll
+        // Keep speed at 0 during countdown so road is still
+        model.speed = 0.0;
         if (model.countdown <= 0) {
           model.state = _GameState.running;
           model.speed = 0.0;
@@ -217,8 +218,11 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
     // Use road height to convert normalized speed to pixels per second and
     // bias stripes to move a bit faster than traffic for stronger motion.
     final stripeBias = 2.0; // stripes a bit faster than traffic
-    final pixelsPerSec = (0.8 + 2.8 * model.speed) * road.height * stripeBias * _speedFactor;
-    model.scroll = (model.scroll + dt * pixelsPerSec) % (road.height * 1000);
+    // Road should not move when speed is 0
+    final pixelsPerSec = (2.8 * model.speed) * road.height * stripeBias * _speedFactor;
+    if (pixelsPerSec > 0) {
+      model.scroll = (model.scroll + dt * pixelsPerSec) % (road.height * 1000);
+    }
 
     // Day/Night cycle over ~40s
     final phase = (elapsed.inMilliseconds / 40000.0) % 2.0; // 0..2
