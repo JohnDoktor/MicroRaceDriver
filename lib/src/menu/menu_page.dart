@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+// unused audio test imports removed
 import '../config.dart';
 import '../lemans/lemans_page.dart';
 
@@ -10,8 +11,8 @@ class MenuPage extends StatefulWidget {
 }
 
 class _MenuPageState extends State<MenuPage> {
-  ControlMode _mode = ControlMode.both;
-  double _difficulty = 1.0; // 0.7 easy, 1.0 normal, 1.3 hard
+  bool _musicEnabled = true;
+  bool _sfxEnabled = true;
 
   @override
   Widget build(BuildContext context) {
@@ -26,14 +27,36 @@ class _MenuPageState extends State<MenuPage> {
               const SizedBox(height: 8),
               const Text('Le Mans style', style: TextStyle(fontFamily: 'VT323', fontSize: 20, color: Colors.white70)),
               const SizedBox(height: 32),
-              _ModeSelector(mode: _mode, onChanged: (m) => setState(() => _mode = m)),
-              const SizedBox(height: 16),
-              _DifficultySlider(value: _difficulty, onChanged: (v) => setState(() => _difficulty = v)),
+              // Controls selector hidden; difficulty removed
+              const SizedBox(height: 8),
+              // Volume sliders removed
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12.0),
+                child: Row(
+                  children: [
+                    Checkbox(
+                      value: _musicEnabled,
+                      onChanged: (v) => setState(() => _musicEnabled = v ?? true),
+                    ),
+                    const Text('Music', style: TextStyle(fontFamily: 'VT323', fontSize: 18, color: Colors.white70)),
+                    const Spacer(),
+                    Checkbox(
+                      value: _sfxEnabled,
+                      onChanged: (v) => setState(() => _sfxEnabled = v ?? true),
+                    ),
+                    const Text('Sound Effects', style: TextStyle(fontFamily: 'VT323', fontSize: 18, color: Colors.white70)),
+                  ],
+                ),
+              ),
+              // Test sound button removed
               const SizedBox(height: 32),
               ElevatedButton(
                 onPressed: () {
                   Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => LeMansPage(config: GameConfig(controlMode: _mode, difficulty: _difficulty)),
+                    builder: (_) => LeMansPage(config: GameConfig(
+                      musicEnabled: _musicEnabled,
+                      sfxEnabled: _sfxEnabled,
+                    )),
                   ));
                 },
                 child: const Text('Start', style: TextStyle(fontFamily: 'VT323', fontSize: 24)),
@@ -44,47 +67,10 @@ class _MenuPageState extends State<MenuPage> {
       ),
     );
   }
+
+  // audio test function removed
 }
 
-class _ModeSelector extends StatelessWidget {
-  final ControlMode mode; final ValueChanged<ControlMode> onChanged;
-  const _ModeSelector({required this.mode, required this.onChanged});
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        const Text('Controls: ', style: TextStyle(fontFamily: 'VT323', fontSize: 20, color: Colors.white70)),
-        DropdownButton<ControlMode>(
-          value: mode,
-          dropdownColor: Colors.black,
-          style: const TextStyle(fontFamily: 'VT323', fontSize: 18, color: Colors.white),
-          items: const [
-            DropdownMenuItem(value: ControlMode.drag, child: Text('Drag')),
-            DropdownMenuItem(value: ControlMode.buttons, child: Text('Buttons')),
-            DropdownMenuItem(value: ControlMode.both, child: Text('Both')),
-          ],
-          onChanged: (m) { if (m != null) onChanged(m); },
-        ),
-      ],
-    );
-  }
-}
+// Controls selector and difficulty slider removed
 
-class _DifficultySlider extends StatelessWidget {
-  final double value; final ValueChanged<double> onChanged;
-  const _DifficultySlider({required this.value, required this.onChanged});
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        const Text('Difficulty', style: TextStyle(fontFamily: 'VT323', fontSize: 20, color: Colors.white70)),
-        Slider(
-          min: 0.7, max: 1.3, divisions: 6, value: value,
-          onChanged: onChanged,
-        ),
-      ],
-    );
-  }
-}
-
+// removed old slider/test widgets and helpers

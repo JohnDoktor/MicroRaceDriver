@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'palette.dart';
 import 'dart:typed_data';
+import 'dart:io';
 import 'package:audioplayers/audioplayers.dart';
 import '../config.dart';
 
@@ -167,6 +168,8 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
     model.roadWidthChangeTimer = 3.0;
     model.overtakeCooldown = 0.0;
     model.refRoadWidth = 0.0;
+    // Restart music from the beginning when a new game starts
+    _music.start();
   }
 
   void _onTick(Duration elapsed) {
@@ -221,6 +224,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
         break;
       case _GameState.gameOver:
         model.speed = model.speed * 0.98; // gentle roll-down
+        _music.stop();
         if (model.speed < 0.003) model.speed = 0.0; // fully stop
         // Occasionally spawn an overtake car when fully stopped
         if (model.speed == 0.0) {
@@ -598,6 +602,12 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
       child: LayoutBuilder(
         builder: (context, constraints) {
           final road = _roadRectForSize(Size(constraints.maxWidth, constraints.maxHeight));
+          // Keep audio mixers in sync with config each frame
+          final mus = model.config.musicEnabled ? model.config.musicVolume : 0.0;
+          final sfx = model.config.sfxEnabled ? model.config.sfxVolume : 0.0;
+          _engine.master = sfx; // engine treated as SFX
+          audio.sfxVolume = sfx;
+          _music.setVolume(mus);
           return widget.builder(context, model, road);
         },
       ),
@@ -1126,19 +1136,25 @@ class _LeMansPainter extends CustomPainter {
 
 class _Audio {
   final AudioPlayer _player = AudioPlayer()..setPlayerMode(PlayerMode.lowLatency);
+  double sfxVolume = 1.0; // master SFX volume 0..1
   Future<void> beep(int freq, int ms) async {
     try {
-      final bytes = _sineWavBytes(freq: freq, ms: ms, vol: 0.7);
-      await _player.play(BytesSource(bytes));
+      final bytes = _sineWavBytes(freq: freq, ms: ms, vol: 0.7 * sfxVolume);
+      final path = await _writeTempWav(bytes, prefix: 'beep');
+      await _player.play(DeviceFileSource(path));
     } catch (_) {}
   }
 
   Future<void> whoosh() async {
     try {
       final p = AudioPlayer()..setPlayerMode(PlayerMode.lowLatency);
-      await p.play(BytesSource(_sineWavBytes(freq: 700, ms: 40, vol: 0.6)));
+      final p1 = await _writeTempWav(_sineWavBytes(freq: 700, ms: 40, vol: 0.6 * sfxVolume), prefix: 'wh1');
+      await p.play(DeviceFileSource(p1));
       await Future.delayed(const Duration(milliseconds: 35));
-      await p.play(BytesSource(_sineWavBytes(freq: 1000, ms: 40, vol: 0.6)));
+      final p2 = await _writeTempWav(_sineWavBytes(freq: 1000, ms: 40, vol: 0.6 * sfxVolume), prefix: 'wh2');
+      await p.play(DeviceFileSource(p2));
+      await Future.delayed(const Duration(milliseconds: 100));
+      await p.stop();
       p.dispose();
     } catch (_) {}
   }
@@ -1148,8 +1164,12 @@ class _Audio {
     // short rising tone + noise burst
     try {
       final p = AudioPlayer()..setPlayerMode(PlayerMode.lowLatency);
-      await p.play(BytesSource(_sineWavBytes(freq: 1200, ms: 60, vol: 0.5)));
-      await p.play(BytesSource(_noiseWavBytes(ms: 90, vol: 0.35)));
+      final s1 = await _writeTempWav(_sineWavBytes(freq: 1200, ms: 60, vol: 0.5 * sfxVolume), prefix: 'scr');
+      await p.play(DeviceFileSource(s1));
+      final s2 = await _writeTempWav(_noiseWavBytes(ms: 90, vol: 0.35 * sfxVolume), prefix: 'scrN');
+      await p.play(DeviceFileSource(s2));
+      await Future.delayed(const Duration(milliseconds: 180));
+      await p.stop();
       p.dispose();
     } catch (_) {}
   }
@@ -1158,7 +1178,10 @@ class _Audio {
     // short filtered noise burst
     try {
       final p = AudioPlayer()..setPlayerMode(PlayerMode.lowLatency);
-      await p.play(BytesSource(_noiseWavBytes(ms: 120, vol: 0.45)));
+      final s = await _writeTempWav(_noiseWavBytes(ms: 120, vol: 0.45 * sfxVolume), prefix: 'spl');
+      await p.play(DeviceFileSource(s));
+      await Future.delayed(const Duration(milliseconds: 140));
+      await p.stop();
       p.dispose();
     } catch (_) {}
   }
@@ -1167,8 +1190,12 @@ class _Audio {
     // thud (low sine) + noise
     try {
       final p = AudioPlayer()..setPlayerMode(PlayerMode.lowLatency);
-      await p.play(BytesSource(_sineWavBytes(freq: 180, ms: 90, vol: 0.7)));
-      await p.play(BytesSource(_noiseWavBytes(ms: 110, vol: 0.5)));
+      final s1 = await _writeTempWav(_sineWavBytes(freq: 180, ms: 120, vol: 0.95 * sfxVolume), prefix: 'cr1');
+      await p.play(DeviceFileSource(s1));
+      final s2 = await _writeTempWav(_noiseWavBytes(ms: 140, vol: 0.8 * sfxVolume), prefix: 'cr2');
+      await p.play(DeviceFileSource(s2));
+      await Future.delayed(const Duration(milliseconds: 220));
+      await p.stop();
       p.dispose();
     } catch (_) {}
   }
@@ -1176,9 +1203,14 @@ class _Audio {
   Future<void> gameOver() async {
     try {
       final p = AudioPlayer()..setPlayerMode(PlayerMode.lowLatency);
-      await p.play(BytesSource(_sineWavBytes(freq: 660, ms: 120, vol: 0.5)));
-      await p.play(BytesSource(_sineWavBytes(freq: 440, ms: 150, vol: 0.6)));
-      await p.play(BytesSource(_sineWavBytes(freq: 330, ms: 180, vol: 0.6)));
+      final a = await _writeTempWav(_sineWavBytes(freq: 660, ms: 120, vol: 0.5 * sfxVolume), prefix: 'go1');
+      await p.play(DeviceFileSource(a));
+      final b = await _writeTempWav(_sineWavBytes(freq: 440, ms: 150, vol: 0.6 * sfxVolume), prefix: 'go2');
+      await p.play(DeviceFileSource(b));
+      final c = await _writeTempWav(_sineWavBytes(freq: 330, ms: 180, vol: 0.6 * sfxVolume), prefix: 'go3');
+      await p.play(DeviceFileSource(c));
+      await Future.delayed(const Duration(milliseconds: 500));
+      await p.stop();
       p.dispose();
     } catch (_) {}
   }
@@ -1236,28 +1268,113 @@ Uint8List _noiseWavBytes({required int ms, double vol = 1.0}) {
   return data.toBytes();
 }
 
+Future<String> _writeTempWav(Uint8List bytes, {String prefix = 'snd'}) async {
+  final dir = Directory.systemTemp;
+  final path = '${dir.path}/racedriver_${prefix}_${DateTime.now().microsecondsSinceEpoch}.wav';
+  final f = File(path);
+  await f.writeAsBytes(bytes, flush: true);
+  return path;
+}
+
+Uint8List _engineWavBytes({required int freq, required int ms}) {
+  // Resonant-noise engine: pulse train at f0 + filtered noise through resonators
+  const sr = 22050;
+  final total = (sr * ms / 1000).floor();
+  final bb = BytesBuilder();
+  // WAV header mono 16-bit
+  final byteRate = sr * 2;
+  final blockAlign = 2;
+  final subchunk2 = total * 2;
+  final chunk = 36 + subchunk2;
+  void w32(int v) => bb.add([v & 0xFF, (v >> 8) & 0xFF, (v >> 16) & 0xFF, (v >> 24) & 0xFF]);
+  void w16(int v) => bb.add([v & 0xFF, (v >> 8) & 0xFF]);
+  bb.add('RIFF'.codeUnits); w32(chunk); bb.add('WAVE'.codeUnits);
+  bb.add('fmt '.codeUnits); w32(16); w16(1); w16(1); w32(sr); w32(byteRate); w16(blockAlign); w16(16);
+  bb.add('data'.codeUnits); w32(subchunk2);
+
+  // Fundamental (pulse) frequency ~ freq (Hz); duty ~0.25 simulates firing pulses
+  final f0 = freq.toDouble().clamp(40.0, 180.0);
+  final duty = 0.25;
+
+  // Two resonators to emulate intake/exhaust formants
+  // Centers scale mildly with f0 so tone changes with speed
+  final fc1 = (350.0 + f0 * 1.5).clamp(300.0, 900.0); // lower formant
+  final fc2 = (1100.0 + f0 * 2.0).clamp(900.0, 2200.0); // upper formant
+  double r1 = 0.985; // bandwidth
+  double r2 = 0.990;
+  final c1 = 2.0 * math.cos(2 * math.pi * fc1 / sr);
+  final c2 = 2.0 * math.cos(2 * math.pi * fc2 / sr);
+  double y1_1 = 0.0, y1_2 = 0.0;
+  double y2_1 = 0.0, y2_2 = 0.0;
+  final rnd = math.Random();
+
+  double prev = 0.0;
+  final fade = (sr * 0.01).round(); // 10ms fade to avoid loop clicks
+  for (int i = 0; i < total; i++) {
+    final t = i / sr;
+    // Pulse train at f0
+    final ph = (t * f0) % 1.0;
+    final pulse = ph < duty ? 1.0 : -0.8; // asymmetry
+    // White noise input
+    final n = (rnd.nextDouble() * 2 - 1);
+    // Resonators (second-order): y[n] = 2*r*cos(w)*y[n-1] - r^2*y[n-2] + x
+    final y1 = c1 * r1 * y1_1 - (r1 * r1) * y1_2 + n * 0.08;
+    y1_2 = y1_1; y1_1 = y1;
+    final y2 = c2 * r2 * y2_1 - (r2 * r2) * y2_2 + n * 0.05;
+    y2_2 = y2_1; y2_1 = y2;
+    // Mix: pulse dominates low end, resonators add realistic body
+    double s = pulse * 0.28 + y1 * 0.35 + y2 * 0.22;
+    // Gentle tremolo for life
+    final trem = 0.9 + 0.1 * math.sin(2 * math.pi * 18.0 * t);
+    s *= trem;
+    // Simple low-pass smoothing to reduce harshness
+    const alpha = 0.18;
+    s = prev + alpha * (s - prev);
+    prev = s;
+    // Apply fade-in/out window
+    double w = 1.0;
+    if (i < fade) {
+      w = i / fade;
+    } else if (i > total - fade) {
+      w = (total - i) / fade;
+    }
+    final v = (s * w * 32767).clamp(-32768, 32767).toInt();
+    w16(v);
+  }
+  return bb.toBytes();
+}
+
 class _EngineAudio {
   final AudioPlayer _p = AudioPlayer();
   int _lastFreq = 0;
   bool _started = false;
+  double master = 1.0;
+  final Map<int, String> _cache = {};
   Future<void> update(double speed) async {
     final freq = (140 + speed * 320).round();
-    final vol = 0.05 + speed * 0.15;
+    final vol = (0.05 + speed * 0.15) * master; // turned down overall
     if (!_started) {
-      final bytes = _sineWavBytes(freq: freq, ms: 200, vol: vol);
+      final path = await _pathForFreq(freq);
       await _p.setReleaseMode(ReleaseMode.loop);
-      await _p.play(BytesSource(bytes));
+      await _p.play(DeviceFileSource(path));
       _started = true;
       _lastFreq = freq;
-    } else if ((freq - _lastFreq).abs() > 20) {
+    } else if ((freq - _lastFreq).abs() > 60) {
       // Refresh loop with new pitch occasionally to avoid choppiness
-      final bytes = _sineWavBytes(freq: freq, ms: 200, vol: vol);
+      final path = await _pathForFreq(freq);
       await _p.stop();
-      await _p.play(BytesSource(bytes));
+      await _p.play(DeviceFileSource(path));
       _lastFreq = freq;
     } else {
       await _p.setVolume(vol.clamp(0.0, 1.0));
     }
+  }
+  Future<String> _pathForFreq(int freq) async {
+    if (_cache.containsKey(freq)) return _cache[freq]!;
+    final bytes = _engineWavBytes(freq: freq, ms: 1000);
+    final path = await _writeTempWav(bytes, prefix: 'eng_$freq');
+    _cache[freq] = path;
+    return path;
   }
   void dispose() { _p.dispose(); }
 }
@@ -1265,23 +1382,29 @@ class _EngineAudio {
 class _Music {
   final AudioPlayer _p = AudioPlayer();
   bool _started = false;
+  double master = 0.35;
   Future<void> start() async {
     if (_started) return;
     final bytes = _makeLoop();
     await _p.setReleaseMode(ReleaseMode.loop);
-    await _p.setVolume(0.35);
-    await _p.play(BytesSource(bytes));
+    await _p.setVolume(master);
+    final path = await _writeTempWav(bytes, prefix: 'music');
+    await _p.play(DeviceFileSource(path));
     _started = true;
   }
+  Future<void> stop() async { if (_started) { await _p.stop(); _started = false; } }
+  Future<void> setVolume(double v) async { master = v.clamp(0.0, 1.0); await _p.setVolume(master); }
   void dispose() { _p.dispose(); }
 
   Uint8List _makeLoop() {
-    // Simple 4-bar chiptune at 120 BPM (4/4), 16th-note steps (64 steps total)
+    // 32-bar chiptune at 120 BPM (4/4), 16th-note steps with A/B/C/D sections for variation
     const sr = 22050;
     const bpm = 120.0;
     const beatSec = 60.0 / bpm; // 0.5s
     const stepSec = beatSec / 4.0; // 16th note = 0.125s
-    const steps = 64; // 4 bars
+    const bars = 32;
+    const stepsPerBar = 16;
+    const steps = bars * stepsPerBar;
     final totalSamples = (steps * stepSec * sr).round();
     final mix = List<double>.filled(totalSamples, 0.0);
 
@@ -1299,95 +1422,144 @@ class _Music {
       if (t < a) return t / a;
       final rest = (dur - a).clamp(0.0001, dur);
       final tt = (t - a) / rest;
-      final e = (1.0 - tt).clamp(0.0, 1.0);
-      return e;
+      return (1.0 - tt).clamp(0.0, 1.0);
     }
     double noise(int i) {
-      // cheap hash noise in -1..1
       int x = i * 1103515245 + 12345;
       x = (x >> 3) ^ (x << 1);
       return ((x & 1023) / 511.5) - 1.0;
     }
 
-    void addVoice(List<int> midiSeq, {double vol = 0.2, String wave = 'square', double duty = 0.5, int stepDiv = 1}) {
+    void addSteps(List<int> midiSeq, {double vol = 0.2, String wave = 'square', double duty = 0.5, int lenSteps = 1}) {
       for (int s = 0; s < steps; s++) {
         final midi = midiSeq[s % midiSeq.length];
         if (midi <= 0) continue; // rest
         final start = (s * stepSec * sr).round();
-        final len = (stepSec * sr / stepDiv).round();
+        final len = (stepSec * sr * lenSteps).round();
         final f = noteHz(midi);
         for (int i = 0; i < len && start + i < totalSamples; i++) {
           final t = i / sr;
-          final e = envAD(t, len / sr, a: 0.01, d: 0.15);
-          final sampleT = (i / sr);
+          final e = envAD(t, len / sr, a: 0.004, d: 0.18);
           double w;
           if (wave == 'square') {
-            w = square(sampleT, f, duty: duty);
+            w = square(t, f, duty: duty);
           } else {
-            w = tri(sampleT, f);
+            w = tri(t, f);
           }
           mix[start + i] += w * e * vol;
         }
       }
     }
 
-    // Chords progression in C minor: Cm -> Ab -> Bb -> G
-    final chords = <List<int>>[
-      [60, 63, 67], // C, Eb, G
-      [56, 60, 63], // Ab, C, Eb
-      [58, 62, 65], // Bb, D, F
-      [55, 59, 62], // G, Bb, D
-    ];
-    // Lead pattern over 4 bars (16 steps per bar)
+    // Sections chord progressions (triads, MIDI): C minor scenes
+    final progA = [[60, 63, 67], [56, 60, 63], [58, 62, 65], [55, 59, 62]]; // Cm Ab Bb G
+    final progB = [[53, 56, 60], [51, 55, 58], [58, 62, 65], [55, 58, 62]]; // Fm Db Eb Bb
+    final progC = [[56, 60, 63], [53, 56, 60], [55, 59, 62], [58, 62, 65]]; // Ab Fm G Bb
+    final progD = [[55, 59, 62], [60, 63, 67], [58, 62, 65], [56, 60, 63]]; // G Cm Bb Ab
+    List<List<int>> chordsForBar(int bar) {
+      final sec = (bar ~/ 8) % 4; // 8 bars per section
+      switch (sec) {
+        case 0: return progA;
+        case 1: return progB;
+        case 2: return progC;
+        default: return progD;
+      }
+    }
+
+    // Build sequences per bar for lead, bass, arp
     final lead = <int>[];
-    for (int bar = 0; bar < 4; bar++) {
-      final chord = chords[bar % chords.length];
-      final root = chord[0];
-      final third = chord[1];
-      final fifth = chord[2];
-      final pattern = [root + 12, third + 12, fifth + 12, third + 12];
-      for (int i = 0; i < 16; i++) {
-        lead.add(pattern[i % pattern.length]);
-      }
-    }
-    // Bass: roots on quarter notes, one octave down
+    final lead2 = <int>[];
     final bass = <int>[];
-    for (int bar = 0; bar < 4; bar++) {
-      final root = chords[bar % chords.length][0] - 12;
-      for (int i = 0; i < 16; i++) {
-        bass.add((i % 4 == 0) ? root : 0);
-      }
-    }
-    // Arp: fast 32nd-note arpeggio implied by stepDiv=2
     final arp = <int>[];
-    for (int bar = 0; bar < 4; bar++) {
-      final c = chords[bar % chords.length];
-      final seq = [c[0] + 12, c[1] + 12, c[2] + 12, c[1] + 12];
-      for (int i = 0; i < 16; i++) { arp.add(seq[i % 4]); }
-    }
-    // Drums: kick on 1 & 3, snare on 2 & 4, hats on 8ths
-    void addKick() {
-      final kickLen = (stepSec * sr * 1.0).round();
-      for (int s = 0; s < steps; s += 8) { // on beats 1 and 3
-        final idx = (s * stepSec * sr).round();
-        for (int i = 0; i < kickLen && idx + i < totalSamples; i++) {
-          final t = i / sr;
-          final env = envAD(t, kickLen / sr, a: 0.005, d: 0.18);
-          final f = 120.0 + 80.0 * (1.0 - t * 8).clamp(0.0, 1.0);
-          final w = math.sin(2 * math.pi * f * t);
-          mix[idx + i] += w * env * 0.35;
+    for (int bar = 0; bar < bars; bar++) {
+      final chords = chordsForBar(bar);
+      final c = chords[bar % 4];
+      final root = c[0];
+      final third = c[1];
+      final fifth = c[2];
+      // Variation pattern selection per bar
+      final mode = bar % 4;
+      List<int> patLead;
+      List<int> patLead2;
+      List<int> patArp;
+      switch (mode) {
+        case 0:
+          patLead = [root + 12, third + 12, fifth + 12, third + 12];
+          patLead2 = [0, root + 24, 0, root + 24];
+          patArp = [root + 12, third + 12, fifth + 12, third + 12];
+          break;
+        case 1:
+          patLead = [third + 12, fifth + 12, root + 12, fifth + 12];
+          patLead2 = [root + 24, 0, third + 24, 0];
+          patArp = [root + 12, fifth + 12, third + 12, fifth + 12];
+          break;
+        case 2:
+          patLead = [fifth + 12, third + 12, root + 12, third + 12];
+          patLead2 = [0, 0, root + 24, 0];
+          patArp = [third + 12, root + 12, fifth + 12, root + 12];
+          break;
+        default:
+          patLead = [root + 12, root + 19, third + 12, fifth + 12]; // add a 7th-ish color
+          patLead2 = [0, root + 24, 0, fifth + 24];
+          patArp = [root + 12, third + 12, fifth + 12, root + 12];
+      }
+      for (int i = 0; i < stepsPerBar; i++) {
+        lead.add(patLead[i % 4]);
+        lead2.add(patLead2[i % 4]);
+        arp.add(patArp[i % 4]);
+        // Bass: quarter notes with occasional fifth on off-beats
+        if (i % 4 == 0) {
+          bass.add(root - 12);
+        } else if (i % 8 == 4 && (bar % 8) >= 4) {
+          bass.add(fifth - 12);
+        } else {
+          bass.add(0);
         }
       }
     }
-    void addSnare() {
+
+    // Drums
+    void addKickSnare() {
+      final kickLen = (stepSec * sr * 1.0).round();
       final snLen = (stepSec * sr * 1.0).round();
-      for (int s = 4; s < steps; s += 8) { // beats 2 and 4
-        final idx = (s * stepSec * sr).round();
-        for (int i = 0; i < snLen && idx + i < totalSamples; i++) {
-          final t = i / sr;
-          final env = envAD(t, snLen / sr, a: 0.002, d: 0.12);
-          final w = noise(idx + i);
-          mix[idx + i] += w * env * 0.25;
+      for (int bar = 0; bar < bars; bar++) {
+        final barStartStep = bar * stepsPerBar;
+        // Kicks on beats 1 and 3
+        for (final beatStep in [0, 8]) {
+          final s = barStartStep + beatStep;
+          final idx = (s * stepSec * sr).round();
+          for (int i = 0; i < kickLen && idx + i < totalSamples; i++) {
+            final t = i / sr;
+            final env = envAD(t, kickLen / sr, a: 0.003, d: 0.15);
+            final f = 100.0 + 80.0 * (1.0 - t * 8).clamp(0.0, 1.0);
+            final w = math.sin(2 * math.pi * f * t);
+            mix[idx + i] += w * env * 0.35;
+          }
+        }
+        // Snares on beats 2 and 4
+        for (final beatStep in [4, 12]) {
+          final s = barStartStep + beatStep;
+          final idx = (s * stepSec * sr).round();
+          for (int i = 0; i < snLen && idx + i < totalSamples; i++) {
+            final t = i / sr;
+            final env = envAD(t, snLen / sr, a: 0.002, d: 0.12);
+            final w = noise(idx + i);
+            mix[idx + i] += w * env * 0.28;
+          }
+        }
+        // Simple fill at the last two 16ths of each 8-bar section
+        if ((bar % 8) == 7) {
+          for (final step in [14, 15]) {
+            final s = barStartStep + step;
+            final idx = (s * stepSec * sr).round();
+            final len = (stepSec * sr * 0.7).round();
+            for (int i = 0; i < len && idx + i < totalSamples; i++) {
+              final t = i / sr;
+              final env = envAD(t, len / sr, a: 0.0015, d: 0.08);
+              final w = noise(idx + i);
+              mix[idx + i] += w * env * 0.22;
+            }
+          }
         }
       }
     }
@@ -1399,16 +1571,17 @@ class _Music {
           final t = i / sr;
           final env = envAD(t, hatLen / sr, a: 0.001, d: 0.05);
           final w = noise(idx + i);
-          mix[idx + i] += w * env * 0.12;
+          mix[idx + i] += w * env * 0.10;
         }
       }
     }
 
-    addVoice(lead, vol: 0.18, wave: 'square', duty: 0.5);
-    addVoice(arp, vol: 0.12, wave: 'square', duty: 0.25, stepDiv: 2);
-    addVoice(bass, vol: 0.20, wave: 'tri');
-    addKick();
-    addSnare();
+    // Mix voices
+    addSteps(lead,  vol: 0.16, wave: 'square', duty: 0.5, lenSteps: 2);
+    addSteps(lead2, vol: 0.10, wave: 'square', duty: 0.25, lenSteps: 1);
+    addSteps(arp,   vol: 0.11, wave: 'square', duty: 0.25, lenSteps: 1);
+    addSteps(bass,  vol: 0.20, wave: 'tri',               lenSteps: 4);
+    addKickSnare();
     addHats();
 
     // Normalize and convert to 16-bit PCM
@@ -1416,7 +1589,6 @@ class _Music {
     for (final v in mix) { final av = v.abs(); if (av > mx) mx = av; }
     final scale = 0.85 / mx;
     final bytes = BytesBuilder();
-    // WAV header
     final byteRate = sr * 2;
     final subchunk2Size = totalSamples * 2;
     final chunkSize = 36 + subchunk2Size;
@@ -1504,19 +1676,26 @@ class _HoldButtonState extends State<_HoldButton> {
   }
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTapDown: (_) => _set(true),
-      onTapUp: (_) => _set(false),
-      onTapCancel: () => _set(false),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 100),
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-        decoration: BoxDecoration(
-          color: _pressed ? Colors.white24 : Colors.white10,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.white30, width: 1),
+    return SizedBox(
+      width: 160,
+      height: 120,
+      child: Center(
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTapDown: (_) => _set(true),
+          onTapUp: (_) => _set(false),
+          onTapCancel: () => _set(false),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 100),
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            decoration: BoxDecoration(
+              color: _pressed ? Colors.white24 : Colors.white10,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.white30, width: 1),
+            ),
+            child: Text(widget.label, style: const TextStyle(fontFamily: 'VT323', fontSize: 28)),
+          ),
         ),
-        child: Text(widget.label, style: const TextStyle(fontFamily: 'VT323', fontSize: 28)),
       ),
     );
   }
