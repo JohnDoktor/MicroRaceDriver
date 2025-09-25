@@ -563,7 +563,7 @@ class _LeMansPainter extends CustomPainter {
   int _g(Color c) => (c.g * 255.0).round() & 0xFF;
   int _b(Color c) => (c.b * 255.0).round() & 0xFF;
   Color _dim(Color c, [double factor = 1.0]) {
-    final dayBlend = 1.0 - model.night * 0.7; // darker at night
+    final dayBlend = 1.0 - model.night * 0.85; // stronger night dimming
     final f = (dayBlend * factor).clamp(0.0, 1.0);
     return Color.fromARGB(255, (_r(c) * f).round(), (_g(c) * f).round(), (_b(c) * f).round());
   }
@@ -646,7 +646,7 @@ class _LeMansPainter extends CustomPainter {
 
     // Traffic
     for (final c in model.traffic) {
-      _drawCar(canvas, c.toRect(road), body: _dim(const Color(0xFFDDDDDD)));
+      _drawCar(canvas, c.toRect(road), body: _dim(const Color(0xFFDDDDDD)), tailLights: true);
     }
 
     // Player car
@@ -750,7 +750,7 @@ class _LeMansPainter extends CustomPainter {
     }
   }
 
-  void _drawCar(Canvas canvas, Rect r, {required Color body}) {
+  void _drawCar(Canvas canvas, Rect r, {required Color body, bool tailLights = false}) {
     final car = RRect.fromRectAndRadius(r, const Radius.circular(3));
     canvas.drawRRect(car, Paint()..color = body);
     // windshield / details
@@ -766,6 +766,22 @@ class _LeMansPainter extends CustomPainter {
     canvas.drawRect(Rect.fromLTWH(r.left - wheelW * 0.5, r.bottom - wheelH - r.height * 0.12, wheelW, wheelH), pWheel);
     canvas.drawRect(
         Rect.fromLTWH(r.right - wheelW * 0.5, r.bottom - wheelH - r.height * 0.12, wheelW, wheelH), pWheel);
+    // tail lights for AI traffic
+    if (tailLights) {
+      final tlW = r.width * 0.16;
+      final tlH = r.height * 0.10;
+      final y = r.bottom - tlH - r.height * 0.06;
+      final left = Rect.fromLTWH(r.left + r.width * 0.08, y, tlW, tlH);
+      final right = Rect.fromLTWH(r.right - r.width * 0.08 - tlW, y, tlW, tlH);
+      final glow = Paint()
+        ..color = const Color.fromARGB(150, 255, 0, 0)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
+      final core = Paint()..color = const Color(0xFFFF3030);
+      canvas.drawRect(left.inflate(2), glow);
+      canvas.drawRect(right.inflate(2), glow);
+      canvas.drawRect(left, core);
+      canvas.drawRect(right, core);
+    }
   }
 
   void _drawHud(Canvas canvas, Size size) {
@@ -846,7 +862,7 @@ class _LeMansPainter extends CustomPainter {
   void _drawHeadlights(Canvas canvas, Size size, double intensity) {
     // Dark overlay layer, then cut out two soft cones using dstOut
     canvas.saveLayer(Offset.zero & size, Paint());
-    final overlayAlpha = (180 * intensity).round().clamp(0, 255);
+    final overlayAlpha = (220 * intensity).round().clamp(0, 255); // stronger darkness
     canvas.drawRect(Offset.zero & size, Paint()..color = Color.fromARGB(overlayAlpha, 0, 0, 0));
 
     final car = model.player.toRect(road);
@@ -854,36 +870,61 @@ class _LeMansPainter extends CustomPainter {
     final leftOrigin = Offset(car.left + car.width * 0.28, frontY);
     final rightOrigin = Offset(car.right - car.width * 0.28, frontY);
 
-    void cone(Offset origin, double spreadFrac, double length) {
+    Path conePath(Offset origin, double spreadFrac, double length) {
       final halfSpread = road.width * spreadFrac;
       final tipY = origin.dy - length;
       final leftTip = Offset(origin.dx - halfSpread, tipY);
       final rightTip = Offset(origin.dx + halfSpread, tipY);
-      final path = Path()
+      return Path()
         ..moveTo(origin.dx, origin.dy)
         ..lineTo(leftTip.dx, leftTip.dy)
         ..lineTo(rightTip.dx, rightTip.dy)
         ..close();
-      final p = Paint()
-        ..blendMode = BlendMode.dstOut
-        ..color = Colors.white
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10);
-      // Outer soft cone
-      canvas.drawPath(path, p);
-      // Inner brighter core for stronger illumination
-      final corePath = Path()
-        ..moveTo(origin.dx, origin.dy)
-        ..lineTo(origin.dx - halfSpread * 0.5, tipY)
-        ..lineTo(origin.dx + halfSpread * 0.5, tipY)
-        ..close();
-      canvas.drawPath(corePath, p);
     }
 
-    final baseLength = road.height * (0.42 + 0.18 * model.speed);
-    final spread = 0.11; // fraction of road width at far end
-    cone(leftOrigin, spread, baseLength);
-    cone(rightOrigin, spread, baseLength);
+    final baseLength = road.height * (0.46 + 0.20 * model.speed);
+    final spread = 0.15; // wider spread for better coverage
+    final leftCone = conePath(leftOrigin, spread, baseLength);
+    final rightCone = conePath(rightOrigin, spread, baseLength);
+    final p = Paint()
+      ..blendMode = BlendMode.dstOut
+      ..color = Colors.white
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10);
+    canvas.drawPath(leftCone, p);
+    canvas.drawPath(rightCone, p);
+    // Inner brighter cores
+    Path core(Offset origin) => conePath(origin, spread * 0.5, baseLength);
+    canvas.drawPath(core(leftOrigin), p);
+    canvas.drawPath(core(rightOrigin), p);
 
+    canvas.restore();
+
+    // Subtle light glints on objects within the cones
+    final combined = Path()..addPath(leftCone, Offset.zero)..addPath(rightCone, Offset.zero);
+    canvas.save();
+    canvas.clipPath(combined);
+    final glint = Paint()
+      ..blendMode = BlendMode.screen
+      ..color = const Color.fromARGB(80, 255, 255, 255);
+    // Traffic highlights
+    for (final c in model.traffic) {
+      final r = c.toRect(road);
+      // small highlight on top surface
+      final cap = Rect.fromLTWH(r.left + r.width * 0.15, r.top + r.height * 0.08, r.width * 0.7, r.height * 0.12);
+      canvas.drawRRect(RRect.fromRectAndRadius(cap, const Radius.circular(2)), glint);
+    }
+    // Hazards
+    for (final h in model.hazards) {
+      final r = h.toRect(road);
+      final cap = Rect.fromCenter(center: r.center.translate(0, -r.height * 0.15), width: r.width * 0.9, height: r.height * 0.4);
+      canvas.drawOval(cap, glint);
+    }
+    // Pickups
+    for (final pck in model.pickups) {
+      final r = pck.toRect(road);
+      final cap = Rect.fromCenter(center: r.center.translate(0, -r.height * 0.1), width: r.width * 0.8, height: r.height * 0.3);
+      canvas.drawOval(cap, glint);
+    }
     canvas.restore();
   }
 
