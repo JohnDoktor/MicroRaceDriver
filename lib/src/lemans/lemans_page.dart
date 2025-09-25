@@ -10,14 +10,18 @@ import '../config.dart';
 
 enum _GameState { countdown, running, paused, gameOver }
 
+const double _kLaneXFactor = 0.42; // horizontal mapping factor (wider lanes)
+
 class _Car {
   double x; // -1..1 relative to road center
   double y; // 0..1 from bottom to top (for AI cars)
   double w; // width in logical units
   double h; // height in logical units
+  double prevY = 0.0;
+  bool passed = false;
   _Car(this.x, this.y, this.w, this.h);
   Rect toRect(Rect road) {
-    final cx = road.center.dx + x * (road.width * 0.45);
+    final cx = road.center.dx + x * (road.width * _kLaneXFactor);
     final hPx = h * road.width; // size relative to road width for stability
     final wPx = w * road.width;
     final bottom = road.bottom - y * road.height;
@@ -31,6 +35,7 @@ class _GameModel {
   double timeLeft = 60.0;
   int score = 0;
   int hiScore = 0;
+  int lives = 3; // remaining lives
   double speed = 0.0; // 0..1
   double scroll = 0.0; // road scroll offset
   final _Car player = _Car(0, 0.16, 0.12, 0.18);
@@ -57,6 +62,22 @@ class _GameModel {
   double curveOffset = 0.0; // -1..1, shifts road center
   double curveTarget = 0.0; // target offset
   double curveChangeTimer = 2.0; // seconds until new target
+  double invuln = 0.0; // seconds of collision grace
+  double safeStart = 0.0; // reduced spawns after start
+  // Skid marks
+  final List<_Skid> skids = <_Skid>[];
+  // Risk/reward multiplier (builds over time without hits)
+  double risk = 0.0;
+  double multiplier = 1.0; // 1.0 .. 3.0
+  // Road width dynamics
+  double roadWidthFactor = 0.86; // portion of screen width
+  double roadWidthTarget = 0.86;
+  double roadWidthChangeTimer = 3.0;
+}
+
+class _Skid {
+  Offset a; Offset b; double life;
+  _Skid(this.a, this.b, this.life);
 }
 
 enum _HazardType { oil, puddle }
@@ -68,8 +89,8 @@ class _Hazard {
   double y; // 0..1 from bottom to top
   _Hazard(this.type, this.x, this.y);
   Rect toRect(Rect road) {
-    final cx = road.center.dx + x * (road.width * 0.45);
-    final s = road.width * 0.11;
+    final cx = road.center.dx + x * (road.width * _kLaneXFactor);
+    final s = road.width * 0.10;
     final bottom = road.bottom - y * road.height;
     return Rect.fromCenter(center: Offset(cx, bottom - s * 0.5), width: s, height: s * 0.65);
   }
@@ -81,7 +102,7 @@ class _Pickup {
   double y; // 0..1 from bottom to top
   _Pickup(this.type, this.x, this.y);
   Rect toRect(Rect road) {
-    final cx = road.center.dx + x * (road.width * 0.45);
+    final cx = road.center.dx + x * (road.width * _kLaneXFactor);
     final s = road.width * 0.1;
     final bottom = road.bottom - y * road.height;
     return Rect.fromCenter(center: Offset(cx, bottom - s * 0.5), width: s, height: s);
@@ -113,6 +134,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
     model.state = _GameState.countdown;
     model.countdown = 3.0;
     model.timeLeft = 60.0;
+    model.lives = 3;
     model.speed = 0.0;
     model.scroll = 0.0;
     model.score = 0;
@@ -121,6 +143,12 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
     model.fuel = 100.0;
     model.combo = 0; model.comboTimer = 0;
     model.shake = 0.0;
+    model.safeStart = 8.0;
+    model.risk = 0.0;
+    model.multiplier = 1.0;
+    model.roadWidthFactor = 0.86;
+    model.roadWidthTarget = 0.86;
+    model.roadWidthChangeTimer = 3.0;
   }
 
   void _onTick(Duration elapsed) {
@@ -136,7 +164,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
     if (size == null) return;
 
     // Calculate road rect once per frame (needed for pixel-based scroll pacing)
-    final road = _roadRectForSize(Size(size.width, size.height));
+    Rect road = _roadRectForSize(Size(size.width, size.height));
 
     // Simulate
     switch (model.state) {
@@ -161,6 +189,9 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
         // Fuel consumption scales with speed and difficulty
         model.fuel -= dt * (0.5 + model.speed * 1.2) * model.config.difficulty;
         if (model.fuel < 0) model.fuel = 0;
+        // Build risk over time -> increases score multiplier
+        model.risk += dt * (0.3 + 0.7 * model.speed);
+        model.multiplier = (1.0 + (model.risk / 8.0).clamp(0.0, 2.0)); // 1..3x
         if (model.timeLeft <= 0) {
           model.timeLeft = 0;
           model.state = _GameState.gameOver;
@@ -198,7 +229,6 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
       model.curveChangeTimer = rng.nextDouble() * 4.0 + 3.0; // 3..7s
       model.curveTarget = (rng.nextDouble() * 2 - 1) * 0.9; // -0.9..0.9
     }
-    final oldCurve = model.curveOffset;
     final curveDelta = (model.curveTarget - model.curveOffset);
     final maxStep = dt * 0.25 * (0.6 + model.speed); // faster at speed
     if (curveDelta.abs() > maxStep) {
@@ -206,25 +236,66 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
     } else {
       model.curveOffset = model.curveTarget;
     }
-    // Inertial drift pushes the car outward during curve transitions
-    final curveVel = (model.curveOffset - oldCurve) / (dt > 0 ? dt : 1);
-    model.player.x += curveVel * 0.15 * (0.6 + model.speed);
+
+    // Keep player's absolute X stable when road sways (car shouldn't auto-turn)
+    final newRoad = _roadRectForSize(Size(size.width, size.height));
+    final dxRoad = newRoad.center.dx - road.center.dx;
+    if (dxRoad != 0) {
+      model.player.x -= dxRoad / (road.width * _kLaneXFactor);
+    }
+
+    // Road width evolution (narrow/widen over time) with compensation
+    model.roadWidthChangeTimer -= dt;
+    if (model.roadWidthChangeTimer <= 0) {
+      model.roadWidthChangeTimer = rng.nextDouble() * 5.0 + 4.0; // 4..9s
+      model.roadWidthTarget = (rng.nextDouble() * 0.16 + 0.74); // 0.74..0.90 of screen width
+    }
+    final oldWidth = road.width;
+    final wDelta = model.roadWidthTarget - model.roadWidthFactor;
+    final wStep = (dt * 0.12).clamp(0.0, 0.12);
+    if (wDelta.abs() > wStep) {
+      model.roadWidthFactor += wStep * wDelta.sign;
+    } else {
+      model.roadWidthFactor = model.roadWidthTarget;
+    }
+    // Recompute road and compensate player x to keep screen position stable
+    final roadAfterWidth = _roadRectForSize(Size(size.width, size.height));
+    final scale = oldWidth / roadAfterWidth.width;
+    model.player.x = (model.player.x * scale).clamp(-1.0, 1.0);
+    road = roadAfterWidth;
 
     // Spawn AI traffic while running
     if (model.state == _GameState.running) {
       model.spawnCooldown -= dt * (0.6 + model.speed) * _speedFactor * model.config.difficulty;
       if (model.spawnCooldown <= 0) {
-        model.spawnCooldown = (rng.nextDouble() * 1.2 + 0.8) / model.config.difficulty; // fewer cars at easy pace
-        final lane = rng.nextInt(3) - 1; // -1,0,1
-        model.traffic.add(_Car(lane * 0.5, 1.1, 0.12, 0.18));
+        model.spawnCooldown = (rng.nextDouble() * 1.2 + 0.8) / model.config.difficulty * (1.0 + model.safeStart * 0.08); // fewer during safe start
+        int lane = rng.nextInt(3) - 1; // -1,0,1
+        // Avoid player's lane often
+        final playerLane = (model.player.x.abs() < 0.25) ? 0 : (model.player.x.isNegative ? -1 : 1);
+        if ((model.safeStart > 4.0) || (lane == playerLane && rng.nextDouble() < 0.7)) {
+          final alternatives = <int>[-1, 0, 1]..remove(playerLane);
+          lane = alternatives[rng.nextInt(alternatives.length)];
+        }
+        // Keep distance from same-lane cars near spawn
+        final tooClose = model.traffic.any((c) => (c.x - lane * 0.5).abs() < 0.1 && (c.y > 0.7));
+        if (!tooClose) {
+          model.traffic.add(_Car(lane * 0.5, 1.1, 0.10, 0.18));
+        } else {
+          model.spawnCooldown *= 0.4; // retry sooner
+        }
       }
       // Hazards spawn
-      model.hazardCooldown -= dt * (0.5 + model.speed * 0.8) * _speedFactor * model.config.difficulty;
+      model.hazardCooldown -= dt * (0.35 + model.speed * 0.6) * _speedFactor * model.config.difficulty;
       if (model.hazardCooldown <= 0) {
-        model.hazardCooldown = (rng.nextDouble() * 2.8 + 1.2) / model.config.difficulty; // spawn less often
-        final lane = (rng.nextInt(3) - 1) * 0.5;
+        model.hazardCooldown = (rng.nextDouble() * 3.4 + 1.6) / model.config.difficulty; // less frequent
+        int laneIndex = rng.nextInt(3) - 1;
+        final playerLane = (model.player.x.abs() < 0.25) ? 0 : (model.player.x.isNegative ? -1 : 1);
+        if (laneIndex == playerLane && rng.nextBool()) {
+          laneIndex = (laneIndex == 1 ? 0 : laneIndex + 1);
+        }
+        final lane = (laneIndex * 0.5).toDouble();
         final type = rng.nextBool() ? _HazardType.oil : _HazardType.puddle;
-        model.hazards.add(_Hazard(type, lane.toDouble(), 1.05));
+        model.hazards.add(_Hazard(type, lane, 1.05));
       }
       // Fuel pickups spawn more rarely
       model.pickupCooldown -= dt * (0.25 + model.speed * 0.5) * _speedFactor;
@@ -240,12 +311,20 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
 
     // Move traffic toward player; remove offscreen and add score
     for (final c in model.traffic) {
-      c.y -= dt * (0.8 + 2.8 * model.speed) * _speedFactor;
+      c.prevY = c.y;
+      c.y -= dt * (0.7 + 2.3 * model.speed) * _speedFactor; // slightly slower closing speed
+      if (!c.passed && c.y <= model.player.y + 0.02) {
+        c.passed = true;
+        if ((c.x - model.player.x).abs() < 0.22) {
+          audio.whoosh();
+        }
+      }
     }
     model.traffic.removeWhere((c) {
       if (c.y < -0.3) {
         model.combo += 1; model.comboTimer = 2.0;
-        model.score += 10 * math.max(1, model.combo ~/ 3);
+        final base = 10 * math.max(1, model.combo ~/ 3);
+        model.score += (base * model.multiplier).round();
         model.passed += 1;
         if (model.passed % 5 == 0 && model.state == _GameState.running) {
           model.timeLeft = math.min(99, model.timeLeft + 1.0); // small reward
@@ -271,19 +350,27 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
     }
     model.pickups.removeWhere((p) => p.y < -0.2);
     for (final h in model.hazards) {
-      if (h.toRect(road).overlaps(pRect)) {
+      if (model.invuln <= 0 && h.toRect(road).deflate(road.width * 0.02).overlaps(pRect.deflate(road.width * 0.02))) {
         if (h.type == _HazardType.oil) {
           // brief slip effect
           model.player.x += (rng.nextDouble() - 0.5) * 0.3;
           model.speed = math.max(0.3, model.speed * 0.6);
           audio.beep(220, 90);
           model.shake = 0.2;
+          // Drop quick skid marks at tires
+          final pr = model.player.toRect(road);
+          final l = Offset(pr.left + pr.width*0.05, pr.bottom - pr.height*0.2);
+          final r = Offset(pr.right - pr.width*0.05, pr.bottom - pr.height*0.2);
+          model.skids.add(_Skid(l.translate(-6, -2), l.translate(6, 2), 0.6));
+          model.skids.add(_Skid(r.translate(-6, -2), r.translate(6, 2), 0.6));
         } else {
           // puddle slows down a bit and darkens screen briefly
           model.speed = math.max(0.25, model.speed * 0.7);
           audio.beep(300, 80);
           model.shake = 0.15;
         }
+        model.invuln = 1.0; // grace window to avoid chain hits
+        model.risk = 0.0; model.multiplier = 1.0; // reset multiplier on hit
       }
     }
     for (final p in model.pickups) {
@@ -301,20 +388,46 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
     }
     model.pickups.removeWhere((p) => p.y < 0);
     for (final car in model.traffic) {
-      if (car.toRect(road).overlaps(pRect)) {
+      if (model.invuln <= 0 && car.toRect(road).deflate(road.width * 0.02).overlaps(pRect.deflate(road.width * 0.02))) {
         // Simple collision penalty
         model.speed = 0.2;
         model.timeLeft = math.max(0, model.timeLeft - 3.0);
         audio.beep(120, 120);
         model.shake = 0.25;
+        model.invuln = 1.0;
+        model.risk = 0.0; model.multiplier = 1.0;
+        // Lose a life on traffic collision
+        model.lives = math.max(0, model.lives - 1);
+        if (model.lives <= 0) {
+          model.state = _GameState.gameOver;
+          model.hiScore = math.max(model.hiScore, model.score);
+        }
         break;
+      }
+    }
+
+    // Side collisions with road edges
+    final driveLeft = road.left + road.width * 0.08;
+    final driveRight = road.right - road.width * 0.08;
+    if (model.invuln <= 0 && (pRect.left < driveLeft || pRect.right > driveRight)) {
+      model.speed = math.max(0.25, model.speed * 0.6);
+      model.timeLeft = math.max(0, model.timeLeft - 1.0);
+      audio.beep(180, 100);
+      model.shake = 0.2;
+      model.invuln = 0.5;
+      // Nudge back onto road
+      if (pRect.left < driveLeft) {
+        model.player.x += 0.08;
+      } else {
+        model.player.x -= 0.08;
       }
     }
 
     // Engine audio follow speed
     _engine.update(model.speed);
-    // Shake decay
+    // Shake & invulnerability decay
     if (model.shake > 0) model.shake = math.max(0, model.shake - dt * 1.4);
+    if (model.invuln > 0) model.invuln = math.max(0, model.invuln - dt);
 
     setState(() {});
   }
@@ -322,7 +435,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
   Duration? _lastTime;
 
   Rect _roadRectForSize(Size s) {
-    final w = s.width * 0.86; // road+edges width region
+    final w = s.width * (model.roadWidthFactor); // road+edges width region (dynamic)
     final maxShift = s.width * 0.18; // sway left/right
     final centerX = s.width * 0.5 + model.curveOffset.clamp(-1.0, 1.0) * maxShift;
     final left = (centerX - w * 0.5).clamp(0.0, s.width - w);
@@ -333,7 +446,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
     final size = context.size;
     if (size == null) return;
     final road = _roadRectForSize(size);
-    final nx = ((d.localPosition.dx - road.center.dx) / (road.width * 0.45)).clamp(-1.0, 1.0);
+    final nx = ((d.localPosition.dx - road.center.dx) / (road.width * _kLaneXFactor)).clamp(-1.0, 1.0);
     model.player.x = nx.toDouble();
   }
 
@@ -424,6 +537,12 @@ class _LeMansPainter extends CustomPainter {
     _drawHatch(canvas, Rect.fromLTWH(road.right - road.width * 0.04, 0, road.width * 0.04, size.height));
     // Roadside posts (parallax)
     _drawRoadsidePosts(canvas, size);
+    // Skid marks (under cars)
+    for (final s in model.skids) {
+      final alpha = (s.life.clamp(0, 0.6) / 0.6 * 140).round();
+      final paint = Paint()..color = Color.fromARGB(alpha, 40, 40, 40)..strokeWidth = 3;
+      canvas.drawLine(s.a, s.b, paint);
+    }
 
     // Center dashed line
     _drawCenterDashes(canvas, size);
@@ -469,7 +588,15 @@ class _LeMansPainter extends CustomPainter {
     }
 
     // Player car
-    _drawCar(canvas, model.player.toRect(road), body: _dim(const Color(0xFF7EB7FF)));
+    // Player car (flash when invulnerable)
+    final pBody = _dim(const Color(0xFF7EB7FF));
+    _drawCar(canvas, model.player.toRect(road), body: pBody);
+    if (model.invuln > 0) {
+      final flash = (math.sin(model.scroll * 0.1) > 0) ? 160 : 0;
+      if (flash > 0) {
+        _drawCar(canvas, model.player.toRect(road), body: Color.fromARGB(flash, 255, 255, 255));
+      }
+    }
 
     // HUD
     _drawHud(canvas, size);
@@ -597,8 +724,10 @@ class _LeMansPainter extends CustomPainter {
     double y = top;
     y += text('SCORE  ${model.score}', C64Palette.white, y) + 6;
     y += text('TIME   ${model.timeLeft.ceil()}', C64Palette.green, y) + 6;
+    y += text('LIVES  ${model.lives}', C64Palette.purple, y) + 6;
     y += text('FUEL   ${model.fuel.round()}%', C64Palette.white, y) + 6;
     y += text('HI-SCORE ${model.hiScore}', C64Palette.green, y) + 10;
+    y += text('MULT   x${model.multiplier.toStringAsFixed(1)}', C64Palette.cyan, y) + 10;
     y += text('SPEED', C64Palette.white, y) + 4;
     // speed meter boxes (3)
     final boxes = 3;
@@ -702,6 +831,16 @@ class _Audio {
     } catch (_) {}
   }
 
+  Future<void> whoosh() async {
+    try {
+      final p = AudioPlayer()..setPlayerMode(PlayerMode.lowLatency);
+      await p.play(BytesSource(_sineWavBytes(freq: 700, ms: 40, vol: 0.6)));
+      await Future.delayed(const Duration(milliseconds: 35));
+      await p.play(BytesSource(_sineWavBytes(freq: 1000, ms: 40, vol: 0.6)));
+      p.dispose();
+    } catch (_) {}
+  }
+
   void dispose() {
     _player.dispose();
   }
@@ -763,7 +902,9 @@ class LeMansPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return WillPopScope(
+      onWillPop: () async => false, // disable iOS back-swipe/back button
+      child: Scaffold(
       backgroundColor: C64Palette.black,
       body: SafeArea(
         child: _GameTicker(
@@ -815,6 +956,7 @@ class LeMansPage extends StatelessWidget {
             );
           },
         ),
+      ),
       ),
     );
   }
@@ -894,6 +1036,7 @@ class _PauseOverlayState extends State<_PauseOverlay> {
                 children: [
                   ElevatedButton(onPressed: () => setState(() => widget.model.state = _GameState.running), child: const Text('Resume', style: TextStyle(fontFamily: 'VT323', fontSize: 20))),
                   ElevatedButton(onPressed: () { widget.model.state = _GameState.gameOver; }, child: const Text('End', style: TextStyle(fontFamily: 'VT323', fontSize: 20))),
+                  ElevatedButton(onPressed: () { Navigator.of(context).pop(); }, child: const Text('Menu', style: TextStyle(fontFamily: 'VT323', fontSize: 20))),
                 ],
               ),
             ],
