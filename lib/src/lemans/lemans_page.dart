@@ -707,6 +707,9 @@ class _LeMansPainter extends CustomPainter {
   }
 
   void _drawHud(Canvas canvas, Size size) {
+    // Lives (top-left) — three car icons like old arcade machines
+    _drawLives(canvas, size);
+
     final right = size.width - 14.0;
     final x = right - 120.0;
     final top = 16.0;
@@ -757,6 +760,21 @@ class _LeMansPainter extends CustomPainter {
     }
     // Hazard/traffic warnings: small arrows if something is close ahead
     _drawWarnings(canvas, size);
+  }
+
+  void _drawLives(Canvas canvas, Size size) {
+    // Place below the pause button area to avoid overlap
+    final double startX = 14.0;
+    final double startY = 44.0;
+    final double w = 22.0;
+    final double h = 32.0;
+    final double gap = 10.0;
+    for (int i = 0; i < 3; i++) {
+      final rect = Rect.fromLTWH(startX + i * (w + gap), startY, w, h);
+      final alive = i < model.lives;
+      final color = alive ? _dim(C64Palette.cyan) : _dim(C64Palette.darkGray, 0.35);
+      _drawCar(canvas, rect, body: color);
+    }
   }
 
   @override
