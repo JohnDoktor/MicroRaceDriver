@@ -371,6 +371,12 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
         }
         model.invuln = 1.0; // grace window to avoid chain hits
         model.risk = 0.0; model.multiplier = 1.0; // reset multiplier on hit
+        // Lose a life when hitting a hazard
+        model.lives = math.max(0, model.lives - 1);
+        if (model.lives <= 0) {
+          model.state = _GameState.gameOver;
+          model.hiScore = math.max(model.hiScore, model.score);
+        }
       }
     }
     for (final p in model.pickups) {
@@ -420,6 +426,12 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
         model.player.x += 0.08;
       } else {
         model.player.x -= 0.08;
+      }
+      // Lose a life on hard edge impact
+      model.lives = math.max(0, model.lives - 1);
+      if (model.lives <= 0) {
+        model.state = _GameState.gameOver;
+        model.hiScore = math.max(model.hiScore, model.score);
       }
     }
 
