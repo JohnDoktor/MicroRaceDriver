@@ -1,0 +1,39 @@
+default_platform(:ios)
+
+platform :ios do
+  desc "Build IPA for App Store"
+  lane :build do
+    gym(
+      scheme: "Runner",
+      export_method: "app-store",
+      clean: true,
+      silent: true
+    )
+  end
+
+  desc "Upload build to TestFlight/App Store Connect"
+  lane :upload do
+    api_key_path("fastlane/api_key.json") # place your API key here (not committed)
+    pilot(
+      skip_submission: true,
+      skip_waiting_for_build_processing: false
+    )
+  end
+
+  desc "Upload metadata only (no binary)"
+  lane :deliver_metadata do
+    api_key_path("fastlane/api_key.json")
+    deliver(
+      skip_screenshots: true,
+      skip_binary_upload: true,
+      submit_for_review: false
+    )
+  end
+
+  desc "Build and upload"
+  lane :release do
+    build
+    upload
+  end
+end
+

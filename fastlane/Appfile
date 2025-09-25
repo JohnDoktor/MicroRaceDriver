@@ -1,0 +1,4 @@
+app_identifier "dk.johndoktor.racedriver"
+# apple_id "your_apple_id_email@example.com" # not needed when using API key
+# itc_team_name "Your Team Name"           # optional if multiple teams
+
