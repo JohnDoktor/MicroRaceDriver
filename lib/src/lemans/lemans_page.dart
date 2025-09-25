@@ -1190,20 +1190,7 @@ class LeMansPage extends StatelessWidget {
                     painter: _LeMansPainter(model, road),
                   ),
                 ),
-                // Pause button
-                Positioned(
-                  top: 8,
-                  left: 8,
-                  child: _PauseButton(onPressed: () {
-                    if (model.state == _GameState.running) {
-                      model.state = _GameState.paused;
-                    } else if (model.state == _GameState.paused) {
-                      model.state = _GameState.running;
-                    }
-                  }),
-                ),
-                if (model.state == _GameState.paused)
-                  Positioned.fill(child: _PauseOverlay(model: model)),
+                // Pause button removed
                 // On-screen buttons
                 if (config.controlMode != ControlMode.drag) Positioned(
                   left: 0,
@@ -1235,90 +1222,6 @@ class LeMansPage extends StatelessWidget {
   }
 }
 
-class _PauseButton extends StatelessWidget {
-  final VoidCallback onPressed;
-  const _PauseButton({required this.onPressed});
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onPressed,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: Colors.white10,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.white30),
-        ),
-        child: const Text('II', style: TextStyle(fontFamily: 'VT323', fontSize: 22, color: Colors.white)),
-      ),
-    );
-  }
-}
-
-class _PauseOverlay extends StatefulWidget {
-  final _GameModel model;
-  const _PauseOverlay({required this.model});
-  @override
-  State<_PauseOverlay> createState() => _PauseOverlayState();
-}
-
-class _PauseOverlayState extends State<_PauseOverlay> {
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      color: const Color.fromARGB(160, 0, 0, 0),
-      child: Center(
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(color: Colors.black, border: Border.all(color: Colors.white30), borderRadius: BorderRadius.circular(12)),
-          width: MediaQuery.of(context).size.width * 0.8,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('Paused', style: TextStyle(fontFamily: 'VT323', fontSize: 28, color: Colors.white)),
-              const SizedBox(height: 12),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('Difficulty', style: TextStyle(fontFamily: 'VT323', fontSize: 18, color: Colors.white70)),
-                  Slider(min: 0.7, max: 1.3, divisions: 6, value: widget.model.config.difficulty,
-                    onChanged: (v) => setState(() => widget.model.config = GameConfig(controlMode: widget.model.config.controlMode, difficulty: v))),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('Controls', style: TextStyle(fontFamily: 'VT323', fontSize: 18, color: Colors.white70)),
-                  DropdownButton<ControlMode>(
-                    value: widget.model.config.controlMode,
-                    dropdownColor: Colors.black,
-                    style: const TextStyle(fontFamily: 'VT323', fontSize: 18, color: Colors.white),
-                    items: const [
-                      DropdownMenuItem(value: ControlMode.drag, child: Text('Drag')),
-                      DropdownMenuItem(value: ControlMode.buttons, child: Text('Buttons')),
-                      DropdownMenuItem(value: ControlMode.both, child: Text('Both')),
-                    ],
-                    onChanged: (m) => setState(() => widget.model.config = GameConfig(controlMode: m ?? ControlMode.both, difficulty: widget.model.config.difficulty)),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  ElevatedButton(onPressed: () => setState(() => widget.model.state = _GameState.running), child: const Text('Resume', style: TextStyle(fontFamily: 'VT323', fontSize: 20))),
-                  ElevatedButton(onPressed: () { widget.model.state = _GameState.gameOver; }, child: const Text('End', style: TextStyle(fontFamily: 'VT323', fontSize: 20))),
-                  ElevatedButton(onPressed: () { Navigator.of(context).pop(); }, child: const Text('Menu', style: TextStyle(fontFamily: 'VT323', fontSize: 20))),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
 
 class _HoldButton extends StatefulWidget {
   final String label;
