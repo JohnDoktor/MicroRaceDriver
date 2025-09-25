@@ -1438,6 +1438,12 @@ class _EngineAudio {
     _a.dispose();
     _b.dispose();
   }
+
+  Future<void> stop() async {
+    try { await _a.stop(); } catch (_) {}
+    try { await _b.stop(); } catch (_) {}
+    _started = false;
+  }
 }
 
 class _Music {
@@ -1715,7 +1721,12 @@ class LeMansPage extends StatelessWidget {
                                     child: const Text('Continue', style: TextStyle(fontFamily: 'VT323', fontSize: 22)),
                                   ),
                                 ElevatedButton(
-                                  onPressed: () { Navigator.of(context).pop(); },
+                                  onPressed: () {
+                                      final st = context.findAncestorStateOfType<_GameTickerState>();
+                                      st?._music.stop();
+                                      st?._engine.stop();
+                                      Navigator.of(context).pop();
+                                    },
                                   child: const Text('Quit', style: TextStyle(fontFamily: 'VT323', fontSize: 22)),
                                 ),
                               ],
