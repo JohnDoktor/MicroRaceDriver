@@ -1186,9 +1186,11 @@ class _LeMansPainter extends CustomPainter {
           : C64Palette.cyan.withValues(alpha: 0.15);
       canvas.drawRRect(r, Paint()..color = col);
     }
-    // Show 0 KM/H regardless of state
+    // KM/H below speed boxes
     final kmh = (eff * 220).round();
-    drawText('   $kmh KM/H', styleWhite, y + h + 6);
+    final kmhH = drawText('   $kmh KM/H', styleWhite, y + h + 6);
+    // Advance y below KM/H to avoid overlap with nitro
+    y = y + h + 6 + kmhH + 6;
 
     // Multiplier badge below speed (only when > 1x)
     if (model.multiplier > 1.0) {
@@ -1204,7 +1206,7 @@ class _LeMansPainter extends CustomPainter {
     }
     // Nitro heat indicator (thin bar)
     if (model.nitroHeat > 0.01 || model.nitroCooldown > 0) {
-      y += 26;
+      y += 6;
       drawText('NITRO', styleWhite, y);
       final nh = model.nitroHeat.clamp(0.0, 1.0);
       final barY = y + 16;
