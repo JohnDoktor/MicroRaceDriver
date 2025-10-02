@@ -39,6 +39,14 @@ Upload build to TestFlight/App Store Connect
 
 Upload metadata only (no binary)
 
+### ios set_app_information
+
+```sh
+[bundle exec] fastlane ios set_app_information
+```
+
+Set App Information: category, content rights, copyright
+
 ### ios set_promotional_text
 
 ```sh

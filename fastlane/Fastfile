@@ -88,6 +88,7 @@ platform :ios do
       force: true,
       run_precheck_before_submit: false,
       precheck_include_in_app_purchases: false,
+      app_rating_config_path: File.join(File.expand_path('..', __dir__), 'fastlane', 'metadata', 'age_rating.json'),
       # App Information
       primary_category: primary_category,
       primary_first_sub_category: primary_sub1,
@@ -101,6 +102,20 @@ platform :ios do
     }
     params[:primary_second_sub_category] = primary_sub2 unless primary_sub2.nil? || primary_sub2.strip.empty?
     deliver(**params)
+  end
+
+  desc "Set App Privacy to 'No data collected'"
+  lane :set_app_privacy_no_data do
+    require 'json'
+    # Uses Appfile bundle id
+    upload_app_privacy_details_to_app_store(
+      api_key_path: "fastlane/api_key.json",
+      app_identifier: CredentialsManager::AppfileConfig.try_fetch_value(:app_identifier) || ENV['APP_IDENTIFIER'] || "dk.johndoktor.racedriver",
+      privacy_types: [],
+      includes_tracking: false,
+      uses_idfa: false,
+      output_skip_publish: false
+    )
   end
 
   desc "Set App Information: category, content rights, copyright"
