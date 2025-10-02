@@ -1,9 +1,9 @@
 {
   "violenceCartoonOrFantasy": "NONE",
-  "violenceRealisticProlongedGraphicSadistic": "NONE",
+  "violenceRealisticProlongedGraphicOrSadistic": "NONE",
   "violenceRealistic": "NONE",
   "profanityOrCrudeHumor": "NONE",
-  "matureSuggestive": "NONE",
+  "matureOrSuggestiveThemes": "NONE",
   "horrorOrFearThemes": "NONE",
   "medicalOrTreatmentInformation": "NONE",
   "alcoholTobaccoOrDrugUseOrReferences": "NONE",
@@ -12,6 +12,6 @@
   "sexualContentOrNudity": "NONE",
   "unrestrictedWebAccess": false,
   "gambling": false,
-  "contests": false,
+  "contests": "NONE",
   "kidsAgeBand": null
 }

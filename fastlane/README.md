@@ -39,6 +39,14 @@ Upload build to TestFlight/App Store Connect
 
 Upload metadata only (no binary)
 
+### ios set_app_privacy_no_data
+
+```sh
+[bundle exec] fastlane ios set_app_privacy_no_data
+```
+
+Set App Privacy to 'No data collected'
+
 ### ios set_app_information
 
 ```sh

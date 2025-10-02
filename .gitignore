@@ -39,3 +39,7 @@ fastlane/Preview.html
 # Misc
 coverage/
 *.lock.hive
+
+# Ruby bundler
+vendor/
+.bundle/
