@@ -299,12 +299,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
         break;
     }
 
-    // Apply button input steering (faster; disabled at 0 speed)
-    final steer = (model.rightPressed ? 1.0 : 0.0) - (model.leftPressed ? 1.0 : 0.0);
-    if (steer != 0 && model.speed > 0.0) {
-      const double steerSpeed = 0.55 * 3.0; // 3x faster
-      model.player.x = (model.player.x + steer * dt * steerSpeed).clamp(-1.0, 1.0);
-    }
+    // Button steering disabled: swipe-only control
 
     // Scroll road relative to perceived forward speed.
     // Use road height to convert normalized speed to pixels per second and
@@ -1992,27 +1987,30 @@ class LeMansPage extends StatelessWidget {
                   ),
                 ),
                 // Pause button removed
-                // On-screen buttons
-                if (config.controlMode != ControlMode.drag) Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 12,
-                  child: Row(
-                    children: [
-                      const SizedBox(width: 8),
-                      _HoldButton(
-                        label: '<',
-                        onChanged: (pressed) => model.leftPressed = pressed,
+                // Swipe hint overlay: show during countdown and first 3s of running
+                if (model.state == _GameState.countdown || (model.state == _GameState.running && model.elapsed < 3.0))
+                  Positioned(
+                    left: 12,
+                    right: 12,
+                    bottom: 12,
+                    child: SafeArea(
+                      top: false,
+                      child: Center(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: const Color.fromARGB(180, 0, 0, 0),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: Colors.white24),
+                          ),
+                          child: const Text(
+                            'Swipe to steer',
+                            style: TextStyle(fontFamily: 'VT323', fontSize: 22, color: Colors.white),
+                          ),
+                        ),
                       ),
-                      const Spacer(),
-                      _HoldButton(
-                        label: '>',
-                        onChanged: (pressed) => model.rightPressed = pressed,
-                      ),
-                      const SizedBox(width: 8),
-                    ],
+                    ),
                   ),
-                ),
               ],
             );
           },
