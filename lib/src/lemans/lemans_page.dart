@@ -52,6 +52,8 @@ class _GameModel {
   final List<_Pickup> pickups = <_Pickup>[];
   double pickupCooldown = 3.0;
   // Input: swipe-only (no button state)
+  // UI hints
+  bool swipeHint = false; // show "Swipe to steer" overlay
   // Day/Night factor 0 (day) .. 1 (night)
   double night = 0.0;
   int countdownTick = 3; // last whole number observed
@@ -199,6 +201,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
     model.elapsed = 0.0;
     model.level = 1;
     model.bannerText = null; model.bannerTimer = 0.0;
+    model.swipeHint = false;
     // Restart music from the beginning when a new game starts
     _music.start();
   }
@@ -222,6 +225,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
     model.spawnCooldown = 0.5;
     model.hazardCooldown = 1.0;
     model.pickupCooldown = 2.0;
+    model.swipeHint = false;
     _music.start();
   }
 
@@ -257,6 +261,8 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
         if (model.countdown <= 0) {
           model.state = _GameState.running;
           model.speed = 0.0;
+          model.elapsed = 0.0;
+          model.swipeHint = true; // show hint at start of run
           audio.beep(880, 140); // go beep
         }
         break;
@@ -264,6 +270,10 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
         // target speed ramps to 1.0
         model.speed = (model.speed + dt * 0.25 / model.config.difficulty).clamp(0.0, 1.0);
         model.elapsed += dt; // accumulate runtime for progressive difficulty
+        if (model.swipeHint && model.elapsed >= 3.0) {
+          model.swipeHint = false;
+          if (mounted) setState(() {}); // remove hint overlay
+        }
         // Level up every 120s of runtime
         final newLevel = 1 + (model.elapsed ~/ 120);
         if (newLevel > model.level) {
@@ -1985,8 +1995,8 @@ class LeMansPage extends StatelessWidget {
                   ),
                 ),
                 // Pause button removed
-                // Swipe hint overlay: show only for first 3s after game starts running
-                if (model.state == _GameState.running && model.elapsed < 3.0)
+                // Swipe hint overlay driven by model.swipeHint
+                if (model.swipeHint)
                   Positioned(
                     left: 12,
                     right: 12,
