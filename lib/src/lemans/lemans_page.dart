@@ -251,7 +251,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
 
     // Nitro flow multiplier (uses last frame's heat)
     final speedMult = (model.nitroActive && model.nitroCooldown <= 0)
-        ? (1.0 + 0.8 * model.nitroHeat)
+        ? (1.0 + 2.0 * model.nitroHeat)
         : 1.0;
     // Effective speed for visuals/audio
     model.effectiveSpeed = model.speed * speedMult;
@@ -478,8 +478,8 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
           double v = baseFlow * (c.speedScale.clamp(0.5, 0.9)); // randomized per car
           // During nitro, increase absolute world flow and make AI relatively slower
           if (model.nitroActive && model.nitroCooldown <= 0) {
-            v *= speedMult; // approach faster
-            v *= (1.0 - 0.2 * model.nitroHeat); // but relatively slower than player
+            v *= speedMult; // approach faster under nitro
+            v *= (1.0 - 0.3 * model.nitroHeat); // relatively slower to emphasize player boost
           }
           if (model.state == _GameState.gameOver && model.speed == 0.0 && !c.overtake) {
             v = 0.0; // freeze normal traffic when fully stopped at game over
@@ -1182,7 +1182,7 @@ class _LeMansPainter extends CustomPainter {
       canvas.drawRRect(r, Paint()..color = col);
     }
     // Show 0 KM/H regardless of state
-    final kmh = (eff * 160).round();
+    final kmh = (eff * 220).round();
     drawText('   $kmh KM/H', styleWhite, y + h + 6);
 
     // Multiplier badge below speed (only when > 1x)
