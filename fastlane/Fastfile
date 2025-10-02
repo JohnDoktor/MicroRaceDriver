@@ -40,6 +40,9 @@ platform :ios do
       in_house: api_key_data['in_house'] || false
     )
 
+    # Ensure metadata (categories, rights, copyright) is synced before upload
+    deliver_metadata
+
     # Create the app in ASC if missing (ignore error if it already exists)
     begin
       produce(
@@ -71,22 +74,23 @@ platform :ios do
   lane :deliver_metadata do
     # Defaults can be overridden via environment variables
     primary_category = ENV['APP_PRIMARY_CATEGORY'] || 'GAMES'
-    primary_sub1 = ENV['APP_PRIMARY_SUB1'] || 'RACING'
-    primary_sub2 = ENV['APP_PRIMARY_SUB2'] || 'ARCADE'
+    primary_sub1 = ENV['APP_PRIMARY_SUB1'] || 'GAMES_RACING'
+    primary_sub2 = ENV['APP_PRIMARY_SUB2'] || ''
     copyright_str = ENV['APP_COPYRIGHT'] || '© 2025 John Doktor. All rights reserved.'
     has_rights = (ENV['CONTENT_RIGHTS_HAS_RIGHTS'] || 'true').downcase == 'true'
     contains_third_party = (ENV['CONTENT_RIGHTS_CONTAINS_THIRD_PARTY'] || 'false').downcase == 'true'
 
-    deliver(
+    params = {
       api_key_path: "fastlane/api_key.json",
       skip_screenshots: true,
       skip_binary_upload: true,
       submit_for_review: false,
       force: true,
+      run_precheck_before_submit: false,
+      precheck_include_in_app_purchases: false,
       # App Information
       primary_category: primary_category,
       primary_first_sub_category: primary_sub1,
-      primary_second_sub_category: primary_sub2,
       # App Store Version
       copyright: copyright_str,
       # Compliance/Content Rights (review submission info)
@@ -94,16 +98,18 @@ platform :ios do
         content_rights_has_rights: has_rights,
         content_rights_contains_third_party_content: contains_third_party
       }
-    )
+    }
+    params[:primary_second_sub_category] = primary_sub2 unless primary_sub2.nil? || primary_sub2.strip.empty?
+    deliver(**params)
   end
 
   desc "Set App Information: category, content rights, copyright"
   lane :set_app_information do
     require 'json'
 
-    primary_category = ENV['APP_PRIMARY_CATEGORY'] || 'GAMES'
-    primary_sub1 = ENV['APP_PRIMARY_SUB1'] || 'RACING'
-    primary_sub2 = ENV['APP_PRIMARY_SUB2'] || 'ARCADE'
+    primary_category = ENV['APP_PRIMARY_CATEGORY'] || 'Games'
+    primary_sub1 = ENV['APP_PRIMARY_SUB1'] || 'Racing'
+    primary_sub2 = ENV['APP_PRIMARY_SUB2'] || 'Arcade'
     copyright_str = ENV['APP_COPYRIGHT'] || '© 2025 John Doktor. All rights reserved.'
     has_rights = (ENV['CONTENT_RIGHTS_HAS_RIGHTS'] || 'true').downcase == 'true'
     contains_third_party = (ENV['CONTENT_RIGHTS_CONTAINS_THIRD_PARTY'] || 'false').downcase == 'true'
@@ -120,7 +126,8 @@ platform :ios do
     )
 
     require 'spaceship'
-    bundle_id = lane_context[SharedValues::ENVIRONMENT_VARIABLES]&.fetch('APP_IDENTIFIER', nil) || "dk.johndoktor.racedriver"
+    require 'credentials_manager'
+    bundle_id = CredentialsManager::AppfileConfig.try_fetch_value(:app_identifier) || ENV['APP_IDENTIFIER'] || "dk.johndoktor.racedriver"
     app = Spaceship::ConnectAPI::App.find(bundle_id)
     UI.user_error!("App not found in App Store Connect: #{bundle_id}") unless app
 
