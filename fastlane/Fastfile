@@ -97,6 +97,81 @@ platform :ios do
     )
   end
 
+  desc "Set App Information: category, content rights, copyright"
+  lane :set_app_information do
+    require 'json'
+
+    primary_category = ENV['APP_PRIMARY_CATEGORY'] || 'GAMES'
+    primary_sub1 = ENV['APP_PRIMARY_SUB1'] || 'RACING'
+    primary_sub2 = ENV['APP_PRIMARY_SUB2'] || 'ARCADE'
+    copyright_str = ENV['APP_COPYRIGHT'] || '© 2025 John Doktor. All rights reserved.'
+    has_rights = (ENV['CONTENT_RIGHTS_HAS_RIGHTS'] || 'true').downcase == 'true'
+    contains_third_party = (ENV['CONTENT_RIGHTS_CONTAINS_THIRD_PARTY'] || 'false').downcase == 'true'
+
+    api_key_json_path = File.join(__dir__, 'api_key.json')
+    UI.user_error!("Missing API key at #{api_key_json_path}") unless File.exist?(api_key_json_path)
+    api_key_data = JSON.parse(File.read(api_key_json_path))
+    app_store_connect_api_key(
+      key_id: api_key_data['key_id'],
+      issuer_id: api_key_data['issuer_id'],
+      key_content: api_key_data['key'],
+      is_key_content_base64: false,
+      in_house: api_key_data['in_house'] || false
+    )
+
+    require 'spaceship'
+    bundle_id = lane_context[SharedValues::ENVIRONMENT_VARIABLES]&.fetch('APP_IDENTIFIER', nil) || "dk.johndoktor.racedriver"
+    app = Spaceship::ConnectAPI::App.find(bundle_id)
+    UI.user_error!("App not found in App Store Connect: #{bundle_id}") unless app
+
+    app_info = app.fetch_edit_app_info || app.fetch_latest_app_info
+    UI.user_error!("App info not found") unless app_info
+
+    UI.message("Updating App Information: category + copyright...")
+    begin
+      app_info.update(attributes: {
+        primaryCategory: primary_category,
+        primarySubcategoryOne: primary_sub1,
+        primarySubcategoryTwo: primary_sub2,
+        copyright: copyright_str
+      })
+    rescue => e
+      UI.important("Category/copyright update failed: #{e.message}")
+    end
+
+    UI.message("Updating Content Rights declaration...")
+    begin
+      # Try to fetch and update the content rights declaration via Connect API
+      # Depending on fastlane version, this may be exposed as below; otherwise fallback to UI manual.
+      if app_info.respond_to?(:get_content_rights_declaration)
+        cr = app_info.get_content_rights_declaration
+        if cr.nil?
+          if app_info.respond_to?(:create_content_rights_declaration)
+            app_info.create_content_rights_declaration(attributes: {
+              hasRights: has_rights,
+              containsThirdPartyContent: contains_third_party
+            })
+          end
+        else
+          cr.update(attributes: {
+            hasRights: has_rights,
+            containsThirdPartyContent: contains_third_party
+          })
+        end
+      else
+        # As a fallback, attempt generic update if supported by current spaceship
+        app_info.update(attributes: {
+          contentRightsDeclaration: {
+            hasRights: has_rights,
+            containsThirdPartyContent: contains_third_party
+          }
+        })
+      end
+    rescue => e
+      UI.important("Content Rights update not supported by current fastlane/spaceship or failed: #{e.message}. You may need to set it once in App Store Connect UI.")
+    end
+  end
+
   desc "Set promotional text only (no other metadata)"
   lane :set_promotional_text do
     require 'json'
