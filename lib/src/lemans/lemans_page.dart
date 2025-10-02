@@ -42,6 +42,8 @@ class _GameModel {
   int lives = 3; // remaining lives
   double speed = 0.0; // 0..1
   double scroll = 0.0; // road scroll offset
+  // Effective speed used for visuals/audio (applies nitro boost)
+  double effectiveSpeed = 0.0; // can exceed 1.0 for display
   final _Car player = _Car(0, 0.16, 0.12, 0.18);
   final List<_Car> traffic = <_Car>[];
   double spawnCooldown = 0.0;
@@ -247,6 +249,13 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
       model.refRoadWidth = road.width;
     }
 
+    // Nitro flow multiplier (uses last frame's heat)
+    final speedMult = (model.nitroActive && model.nitroCooldown <= 0)
+        ? (1.0 + 0.8 * model.nitroHeat)
+        : 1.0;
+    // Effective speed for visuals/audio
+    model.effectiveSpeed = model.speed * speedMult;
+
     // Simulate
     switch (model.state) {
       case _GameState.countdown:
@@ -314,7 +323,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
     // bias stripes to move a bit faster than traffic for stronger motion.
     final stripeBias = 2.0; // stripes a bit faster than traffic
     // Road should not move when speed is 0
-    final pixelsPerSec = (2.8 * model.speed) * road.height * stripeBias * _speedFactor;
+    final pixelsPerSec = (2.8 * model.speed) * speedMult * road.height * stripeBias * _speedFactor;
     if (pixelsPerSec > 0) {
       model.scroll = (model.scroll + dt * pixelsPerSec) % (road.height * 1000);
     }
@@ -467,6 +476,10 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
           final baseFlow = (2.8 * model.speed) * _speedFactor;
           // AI traffic should appear to drive forward, but slower than player → move slower than ground
           double v = baseFlow * (c.speedScale.clamp(0.5, 0.9)); // randomized per car
+          // During nitro, make AI comparatively slower so the player overtakes more
+          if (model.nitroActive && model.nitroCooldown <= 0) {
+            v *= (1.0 - 0.2 * model.nitroHeat);
+          }
           if (model.state == _GameState.gameOver && model.speed == 0.0 && !c.overtake) {
             v = 0.0; // freeze normal traffic when fully stopped at game over
           }
@@ -532,7 +545,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
     }
     // Hazards and pickups move only while running
     if (model.state == _GameState.running) {
-      final groundFlow = (2.8 * model.speed) * _speedFactor;
+      final groundFlow = (2.8 * model.speed) * _speedFactor * speedMult;
       for (final h in model.hazards) {
         h.y -= dt * groundFlow;
       }
@@ -682,7 +695,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
     }
 
     // Engine audio follow speed
-    _engine.update(model.speed);
+    _engine.update(model.effectiveSpeed.clamp(0.0, 1.0));
     // Shake & invulnerability decay
     if (model.shake > 0) model.shake = math.max(0, model.shake - dt * 1.4);
     if (model.invuln > 0) model.invuln = math.max(0, model.invuln - dt);
@@ -1157,7 +1170,8 @@ class _LeMansPainter extends CustomPainter {
     // speed meter boxes (3)
     final boxes = 3;
     final w = 26.0, h = 16.0, gap = 6.0;
-    int filled = (model.speed * (boxes + 0.001)).floor().clamp(0, boxes);
+    final eff = model.effectiveSpeed <= 0 ? model.speed : model.effectiveSpeed;
+    int filled = (eff.clamp(0.0, 1.0) * (boxes + 0.001)).floor().clamp(0, boxes);
     for (int i = 0; i < boxes; i++) {
       final r = RRect.fromRectAndRadius(
           Rect.fromLTWH(x + i * (w + gap), y, w, h), const Radius.circular(2));
@@ -1167,7 +1181,7 @@ class _LeMansPainter extends CustomPainter {
       canvas.drawRRect(r, Paint()..color = col);
     }
     // Show 0 KM/H regardless of state
-    final kmh = (model.speed * 120).round();
+    final kmh = (eff * 160).round();
     drawText('   $kmh KM/H', styleWhite, y + h + 6);
 
     // Multiplier badge below speed (only when > 1x)
@@ -1937,8 +1951,7 @@ class LeMansPage extends StatelessWidget {
       canPop: false, // disable iOS back-swipe/back button
       child: Scaffold(
       backgroundColor: C64Palette.black,
-      body: SafeArea(
-        child: _GameTicker(
+      body: _GameTicker(
           builder: (context, model, painter) {
             model.config = config;
             return Stack(
@@ -2023,7 +2036,6 @@ class LeMansPage extends StatelessWidget {
             );
           },
         ),
-      ),
       ),
     );
   }
