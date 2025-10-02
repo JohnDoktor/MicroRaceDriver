@@ -476,9 +476,10 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
           final baseFlow = (2.8 * model.speed) * _speedFactor;
           // AI traffic should appear to drive forward, but slower than player → move slower than ground
           double v = baseFlow * (c.speedScale.clamp(0.5, 0.9)); // randomized per car
-          // During nitro, make AI comparatively slower so the player overtakes more
+          // During nitro, increase absolute world flow and make AI relatively slower
           if (model.nitroActive && model.nitroCooldown <= 0) {
-            v *= (1.0 - 0.2 * model.nitroHeat);
+            v *= speedMult; // approach faster
+            v *= (1.0 - 0.2 * model.nitroHeat); // but relatively slower than player
           }
           if (model.state == _GameState.gameOver && model.speed == 0.0 && !c.overtake) {
             v = 0.0; // freeze normal traffic when fully stopped at game over
