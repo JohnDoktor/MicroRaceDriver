@@ -772,6 +772,9 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
       onLongPressEnd: (_) { model.dangerMode = false; },
       child: LayoutBuilder(
         builder: (context, constraints) {
+          // Update painter with safe area top padding so HUD avoids status bar/notch
+          final media = MediaQuery.of(context);
+          _painter.safeTopPadding = media.padding.top;
           // keep audio mixers in sync with config each frame
           // Keep audio mixers in sync with config each frame
           // Apply menu config; in low graphics, mute SFX/engine to avoid CPU spikes
@@ -802,6 +805,8 @@ class _LeMansPainter extends CustomPainter {
   late Rect road;
   final _HudTextCache _hud = _HudTextCache();
   final TextStyle _hudWhite = const TextStyle(fontFamily: 'VT323', fontSize: 18, fontWeight: FontWeight.w700, color: Colors.white);
+  // Safe area padding from the top (provided by widget tree each frame)
+  double safeTopPadding = 0.0;
   _LeMansPainter(this.model, Listenable repaint) : super(repaint: repaint);
   Rect _roadRectForSize(Size s) {
     final w = s.width * (model.roadWidthFactor);
@@ -1140,7 +1145,7 @@ class _LeMansPainter extends CustomPainter {
 
     final right = size.width - 14.0;
     final x = right - 120.0;
-    final top = 16.0;
+    final top = (safeTopPadding + 16.0);
     double drawText(String t, TextStyle style, double yy) {
       final tp = _hud.tp(t, style, maxWidth: 120);
       tp.paint(canvas, Offset(x, yy));
@@ -1236,14 +1241,14 @@ class _LeMansPainter extends CustomPainter {
   void _drawTopLeftHud(Canvas canvas, Size size) {
     // Hi-Score text
     final leftX = 14.0;
-    final topY = 16.0;
+    final topY = (safeTopPadding + 16.0);
     final hi = _hud.tp('HI-SCORE  ${model.hiScore}', const TextStyle(fontFamily: 'VT323', fontSize: 18, fontWeight: FontWeight.w700, color: C64Palette.green), maxWidth: size.width * 0.5);
     hi.paint(canvas, Offset(leftX, topY));
     // Lives (top-left) — three car icons like old arcade machines
     _drawLives(canvas, size);
     // Level under lives
     final levelStyle = const TextStyle(fontFamily: 'VT323', fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white70);
-    final levelY = 44.0 + 32.0 + 10.0;
+    final levelY = (safeTopPadding + 44.0 + 32.0 + 10.0);
     final lvl = _hud.tp('LEVEL ${model.level}', levelStyle, maxWidth: size.width * 0.5);
     lvl.paint(canvas, Offset(14.0, levelY));
     // Show overtake objective progress
@@ -1256,7 +1261,7 @@ class _LeMansPainter extends CustomPainter {
   void _drawLives(Canvas canvas, Size size) {
     // Place below the pause button area to avoid overlap
     final double startX = 14.0;
-    final double startY = 44.0;
+    final double startY = safeTopPadding + 44.0;
     final double w = 22.0;
     final double h = 32.0;
     final double gap = 10.0;
