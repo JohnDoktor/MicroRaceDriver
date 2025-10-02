@@ -15,7 +15,7 @@ class MenuPage extends StatefulWidget {
 class _MenuPageState extends State<MenuPage> with TickerProviderStateMixin {
   bool _musicEnabled = true;
   bool _sfxEnabled = true;
-  bool _lowGraphics = true;
+  final bool _lowGraphics = true;
   late final AnimationController _parallaxCtl;
   late final AnimationController _fadeCtl;
   late final Future<String?> _bgFuture;
@@ -98,7 +98,7 @@ class _MenuPageState extends State<MenuPage> with TickerProviderStateMixin {
               ),
             ),
             // Subtle dark overlay for readability
-            Positioned.fill(child: DecoratedBox(decoration: BoxDecoration(color: Colors.black.withOpacity(0.25)))),
+            Positioned.fill(child: DecoratedBox(decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.25)))),
             Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,

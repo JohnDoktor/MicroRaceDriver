@@ -51,9 +51,7 @@ class _GameModel {
   // Pickups
   final List<_Pickup> pickups = <_Pickup>[];
   double pickupCooldown = 3.0;
-  // Input
-  bool leftPressed = false;
-  bool rightPressed = false;
+  // Input: swipe-only (no button state)
   // Day/Night factor 0 (day) .. 1 (night)
   double night = 0.0;
   int countdownTick = 3; // last whole number observed
@@ -666,7 +664,11 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
         if (model.nitroCooldown > 0) model.nitroCooldown = math.max(0.0, model.nitroCooldown - dt);
       }
       // Near-miss timer decay resets combo
-      if (model.nearMissTimer > 0) model.nearMissTimer = math.max(0.0, model.nearMissTimer - dt); else model.nearMissCombo = 0;
+      if (model.nearMissTimer > 0) {
+        model.nearMissTimer = math.max(0.0, model.nearMissTimer - dt);
+      } else {
+        model.nearMissCombo = 0;
+      }
     }
 
     // Engine audio follow speed
@@ -746,7 +748,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
       onLongPressEnd: (_) { model.dangerMode = false; },
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final road = _roadRectForSize(Size(constraints.maxWidth, constraints.maxHeight));
+          // keep audio mixers in sync with config each frame
           // Keep audio mixers in sync with config each frame
           // Apply menu config; in low graphics, mute SFX/engine to avoid CPU spikes
           final mus = model.config.musicEnabled ? model.config.musicVolume : 0.0;
@@ -776,7 +778,6 @@ class _LeMansPainter extends CustomPainter {
   late Rect road;
   final _HudTextCache _hud = _HudTextCache();
   final TextStyle _hudWhite = const TextStyle(fontFamily: 'VT323', fontSize: 18, fontWeight: FontWeight.w700, color: Colors.white);
-  final TextStyle _hudGreen = const TextStyle(fontFamily: 'VT323', fontSize: 18, fontWeight: FontWeight.w700, color: Color(0xFF00FF00));
   _LeMansPainter(this.model, Listenable repaint) : super(repaint: repaint);
   Rect _roadRectForSize(Size s) {
     final w = s.width * (model.roadWidthFactor);
@@ -1152,7 +1153,7 @@ class _LeMansPainter extends CustomPainter {
           Rect.fromLTWH(x + i * (w + gap), y, w, h), const Radius.circular(2));
       final Color col = i < filled
           ? C64Palette.cyan
-          : C64Palette.cyan.withOpacity(0.15);
+          : C64Palette.cyan.withValues(alpha: 0.15);
       canvas.drawRRect(r, Paint()..color = col);
     }
     // Show 0 KM/H regardless of state
@@ -1198,7 +1199,7 @@ class _LeMansPainter extends CustomPainter {
     if (model.bannerTimer > 0 && model.bannerText != null) {
       final text = _hud.tp(model.bannerText!, const TextStyle(fontFamily: 'VT323', fontSize: 22, fontWeight: FontWeight.w800, color: Colors.white), maxWidth: size.width * 0.9);
       final fade = model.bannerTimer.clamp(0.0, 1.0);
-      final shadow = Paint()..color = Colors.black.withOpacity(0.6 * fade);
+      final shadow = Paint()..color = Colors.black.withValues(alpha: (0.6 * fade));
       final yCenter = size.height * 0.25;
       final x = (size.width - text.width) / 2;
       // simple shadow
@@ -1225,10 +1226,7 @@ class _LeMansPainter extends CustomPainter {
     prog.paint(canvas, Offset(14.0, levelY + 18));
   }
 
-  void _showBanner(String text) {
-    model.bannerText = text;
-    model.bannerTimer = 1.5; // seconds
-  }
+  // Painter does not control banners; handled by ticker state
 
   void _drawLives(Canvas canvas, Size size) {
     // Place below the pause button area to avoid overlap
@@ -1925,8 +1923,8 @@ class LeMansPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return WillPopScope(
-      onWillPop: () async => false, // disable iOS back-swipe/back button
+    return PopScope(
+      canPop: false, // disable iOS back-swipe/back button
       child: Scaffold(
       backgroundColor: C64Palette.black,
       body: SafeArea(
@@ -1987,8 +1985,8 @@ class LeMansPage extends StatelessWidget {
                   ),
                 ),
                 // Pause button removed
-                // Swipe hint overlay: show during countdown and first 3s of running
-                if (model.state == _GameState.countdown || (model.state == _GameState.running && model.elapsed < 3.0))
+                // Swipe hint overlay: show only for first 3s after game starts running
+                if (model.state == _GameState.running && model.elapsed < 3.0)
                   Positioned(
                     left: 12,
                     right: 12,
@@ -2022,44 +2020,4 @@ class LeMansPage extends StatelessWidget {
 }
 
 
-class _HoldButton extends StatefulWidget {
-  final String label;
-  final ValueChanged<bool> onChanged;
-  const _HoldButton({required this.label, required this.onChanged});
-  @override
-  State<_HoldButton> createState() => _HoldButtonState();
-}
-
-class _HoldButtonState extends State<_HoldButton> {
-  bool _pressed = false;
-  void _set(bool p) {
-    if (_pressed == p) return;
-    setState(() => _pressed = p);
-    widget.onChanged(p);
-  }
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 160,
-      height: 120,
-      child: Center(
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTapDown: (_) => _set(true),
-          onTapUp: (_) => _set(false),
-          onTapCancel: () => _set(false),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 100),
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-            decoration: BoxDecoration(
-              color: _pressed ? Colors.white24 : Colors.white10,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.white30, width: 1),
-            ),
-            child: Text(widget.label, style: const TextStyle(fontFamily: 'VT323', fontSize: 28)),
-          ),
-        ),
-      ),
-    );
-  }
-}
+// (swipe-only) on-screen button widget removed
