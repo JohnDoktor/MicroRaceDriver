@@ -69,12 +69,31 @@ platform :ios do
 
   desc "Upload metadata only (no binary)"
   lane :deliver_metadata do
+    # Defaults can be overridden via environment variables
+    primary_category = ENV['APP_PRIMARY_CATEGORY'] || 'GAMES'
+    primary_sub1 = ENV['APP_PRIMARY_SUB1'] || 'RACING'
+    primary_sub2 = ENV['APP_PRIMARY_SUB2'] || 'ARCADE'
+    copyright_str = ENV['APP_COPYRIGHT'] || '© 2025 John Doktor. All rights reserved.'
+    has_rights = (ENV['CONTENT_RIGHTS_HAS_RIGHTS'] || 'true').downcase == 'true'
+    contains_third_party = (ENV['CONTENT_RIGHTS_CONTAINS_THIRD_PARTY'] || 'false').downcase == 'true'
+
     deliver(
       api_key_path: "fastlane/api_key.json",
       skip_screenshots: true,
       skip_binary_upload: true,
       submit_for_review: false,
-      force: true
+      force: true,
+      # App Information
+      primary_category: primary_category,
+      primary_first_sub_category: primary_sub1,
+      primary_second_sub_category: primary_sub2,
+      # App Store Version
+      copyright: copyright_str,
+      # Compliance/Content Rights (review submission info)
+      submission_information: {
+        content_rights_has_rights: has_rights,
+        content_rights_contains_third_party_content: contains_third_party
+      }
     )
   end
 
