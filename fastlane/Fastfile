@@ -230,6 +230,8 @@ platform :ios do
       changelog: File.exist?(File.join(repo_root, 'fastlane', 'metadata', 'en-US', 'release_notes.txt')) ? File.read(File.join(repo_root, 'fastlane', 'metadata', 'en-US', 'release_notes.txt')).strip : "Performance optimizations, improved stability, and new app icon/splash.",
       beta_app_description: beta_description,
       beta_app_feedback_email: beta_feedback_email,
+      demo_account_required: false,
+      beta_app_review_info: { contact_email: beta_feedback_email },
       skip_waiting_for_build_processing: false
     )
   end

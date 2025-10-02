@@ -1,26 +1,80 @@
-Fastlane setup
+fastlane documentation
+----
 
-Files:
-- Fastfile: lanes for `build`, `upload` (TestFlight), `deliver_metadata`, and `release` (build+upload).
-- Appfile: app identifier prefilled (`dk.johndoktor.racedriver`).
-- api_key.json (not committed): place your App Store Connect API Key here.
+# Installation
 
-API key:
-1) App Store Connect → Users and Access → Keys → Generate API Key.
-2) Download the `.p8` and note KEY ID and ISSUER ID.
-3) Create `fastlane/api_key.json` with:
-{
-  "key_id": "KEYID12345",
-  "issuer_id": "ISSUER-ID-UUID",
-  "key": "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----",
-  "in_house": false
-}
+Make sure you have the latest version of the Xcode command line tools installed:
 
-Usage:
-- bundle exec fastlane build
-- bundle exec fastlane upload
-- bundle exec fastlane release
+```sh
+xcode-select --install
+```
 
-Notes:
-- Xcode automatic signing should be enabled in Runner.
-- The `gym` lane exports with `app-store` method.
+For _fastlane_ installation instructions, see [Installing _fastlane_](https://docs.fastlane.tools/#installing-fastlane)
+
+# Available Actions
+
+## iOS
+
+### ios build
+
+```sh
+[bundle exec] fastlane ios build
+```
+
+Build IPA for App Store via Flutter
+
+### ios upload
+
+```sh
+[bundle exec] fastlane ios upload
+```
+
+Upload build to TestFlight/App Store Connect
+
+### ios deliver_metadata
+
+```sh
+[bundle exec] fastlane ios deliver_metadata
+```
+
+Upload metadata only (no binary)
+
+### ios set_promotional_text
+
+```sh
+[bundle exec] fastlane ios set_promotional_text
+```
+
+Set promotional text only (no other metadata)
+
+### ios set_app_info
+
+```sh
+[bundle exec] fastlane ios set_app_info
+```
+
+Set app info localization (name, subtitle)
+
+### ios release
+
+```sh
+[bundle exec] fastlane ios release
+```
+
+Build and upload
+
+### ios beta
+
+```sh
+[bundle exec] fastlane ios beta
+```
+
+Build and distribute to TestFlight group, notify testers
+
+----
+
+This README.md is auto-generated and will be re-generated every time [_fastlane_](https://fastlane.tools) is run.
+
+More information about _fastlane_ can be found on [fastlane.tools](https://fastlane.tools).
+
+The documentation of _fastlane_ can be found on [docs.fastlane.tools](https://docs.fastlane.tools).

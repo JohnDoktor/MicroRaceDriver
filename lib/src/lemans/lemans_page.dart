@@ -72,7 +72,8 @@ class _GameModel {
   final List<_Skid> skids = <_Skid>[];
   // Risk/reward multiplier (builds over time without hits)
   double risk = 0.0;
-  double multiplier = 1.0; // 1.0 .. 3.0
+  double multiplier = 1.0; // score multiplier (increments each perfect minute)
+  double perfectTime = 0.0; // seconds since last life lost
   // Road width dynamics
   double roadWidthFactor = 0.86; // portion of screen width
   double roadWidthTarget = 0.86;
@@ -83,10 +84,31 @@ class _GameModel {
   double refRoadWidth = 0.0;
   // Elapsed running time in seconds (for progression)
   double elapsed = 0.0;
+  // Discrete level that increases every 2 minutes
+  int level = 1;
+  // Transient banner overlay
+  String? bannerText;
+  double bannerTimer = 0.0; // seconds remaining to show banner
   // Extra life spawn timer (seconds). When <= 0 and lives < 3, spawn a life pickup.
   double lifePickupTimer = 120.0;
   // Continues: player may continue up to 3 times after game over; score resets on continue
   int continuesLeft = 3;
+  // Near-miss combo
+  int nearMissCombo = 0;
+  double nearMissTimer = 0.0;
+  // Slipstream
+  double draftTimer = 0.0;
+  // Nitro (heat-based)
+  double nitroHeat = 0.0; // 0..1
+  bool nitroActive = false;
+  double nitroCooldown = 0.0;
+  // Level objective
+  int overtakesGoal = 15;
+  int overtakesDoneThisLevel = 0;
+  // Danger mode (hold)
+  bool dangerMode = false;
+  // Biome visual index
+  int biome = 0;
 }
 
 class _Skid {
@@ -95,7 +117,7 @@ class _Skid {
 }
 
 enum _HazardType { oil, puddle }
-enum _PickupType { fuel, life }
+enum _PickupType { fuel, life, nitro, coin }
 
 class _Hazard {
   final _HazardType type;
@@ -169,12 +191,16 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
     model.safeStart = 8.0;
     model.risk = 0.0;
     model.multiplier = 1.0;
+    model.perfectTime = 0.0;
     model.roadWidthFactor = 0.86;
     model.roadWidthTarget = 0.86;
     model.roadWidthChangeTimer = 3.0;
     model.overtakeCooldown = 0.0;
     model.refRoadWidth = 0.0;
     model.continuesLeft = 3;
+    model.elapsed = 0.0;
+    model.level = 1;
+    model.bannerText = null; model.bannerTimer = 0.0;
     // Restart music from the beginning when a new game starts
     _music.start();
   }
@@ -182,13 +208,14 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
   void _continueGame() {
     if (model.continuesLeft <= 0) return;
     model.continuesLeft -= 1;
-    model.state = _GameState.running;
+    model.state = _GameState.countdown;
+    model.countdown = 3.0;
     model.lives = 3;
     model.score = 0;
     model.speed = 0.0;
     model.fuel = 100.0;
     model.combo = 0; model.comboTimer = 0;
-    model.risk = 0.0; model.multiplier = 1.0;
+    model.risk = 0.0; model.multiplier = 1.0; model.perfectTime = 0.0;
     model.invuln = 1.0;
     model.safeStart = 6.0;
     model.traffic.clear();
@@ -239,12 +266,27 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
         // target speed ramps to 1.0
         model.speed = (model.speed + dt * 0.25 / model.config.difficulty).clamp(0.0, 1.0);
         model.elapsed += dt; // accumulate runtime for progressive difficulty
-        // Fuel consumption scales with speed and difficulty
-        model.fuel -= dt * (0.5 + model.speed * 1.2) * model.config.difficulty;
+        // Level up every 120s of runtime
+        final newLevel = 1 + (model.elapsed ~/ 120);
+        if (newLevel > model.level) {
+          model.level = newLevel;
+          model.biome = (model.level - 1) % 3;
+          // refresh level objective
+          model.overtakesDoneThisLevel = 0;
+          model.overtakesGoal = 10 + (model.level * 5).clamp(0, 40);
+          _showBanner('LEVEL ${model.level}');
+        }
+        // Fuel consumption scales with speed and difficulty (+danger mode drain)
+        final drainFactor = model.dangerMode ? 1.6 : 1.0;
+        model.fuel -= dt * (0.5 + model.speed * 1.2) * model.config.difficulty * drainFactor;
         if (model.fuel < 0) model.fuel = 0;
-        // Build risk over time -> increases score multiplier
-        model.risk += dt * (0.3 + 0.7 * model.speed);
-        model.multiplier = (1.0 + (model.risk / 8.0).clamp(0.0, 2.0)); // 1..3x
+        // Perfect run timer -> every full minute increases multiplier by 1x
+        model.perfectTime += dt;
+        final targetMult = 1 + (model.perfectTime ~/ 60);
+        if (targetMult.toDouble() > model.multiplier) {
+          model.multiplier = targetMult.toDouble();
+          _showBanner('PERFECT RUN - ${targetMult}x POINTS');
+        }
         // No countdown timer; game ends only when lives reach 0
         break;
       case _GameState.paused:
@@ -377,7 +419,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
         final type = rng.nextBool() ? _HazardType.oil : _HazardType.puddle;
         model.hazards.add(_Hazard(type, lane, 1.05));
       }
-      // Fuel pickups: spawn more frequently overall, and slightly more over time
+      // Fuel/Nitro/Coin pickups: spawn more frequently overall, and slightly more over time
       final pickupIntensity = 1.0 + minutes * 0.20; // modest ramp
       model.pickupCooldown -= dt * (0.35 + model.speed * 0.7) * _speedFactor * pickupIntensity;
       if (model.pickupCooldown <= 0) {
@@ -385,7 +427,17 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
         base /= pickupIntensity;
         model.pickupCooldown = base;
         final lane = (rng.nextInt(3) - 1) * 0.5;
-        model.pickups.add(_Pickup(_PickupType.fuel, lane.toDouble(), 1.05));
+        final roll = rng.nextDouble();
+        if (roll < 0.7) {
+          model.pickups.add(_Pickup(_PickupType.fuel, lane.toDouble(), 1.05));
+        } else if (roll < 0.9) {
+          model.pickups.add(_Pickup(_PickupType.nitro, lane.toDouble(), 1.05));
+        } else {
+          // coin line across lanes
+          for (final l in [-0.5, 0.0, 0.5]) {
+            model.pickups.add(_Pickup(_PickupType.coin, l.toDouble(), 1.05 + rng.nextDouble() * 0.05));
+          }
+        }
       }
       // Extra life pickup: every 120s when lives < 3
       if (model.lifePickupTimer > 0) {
@@ -422,8 +474,17 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
           // Mark pass and play whoosh when crossing the player's Y
           if (!c.passed && !c.overtake && c.y <= model.player.y + 0.02) {
             c.passed = true;
-            if ((c.x - model.player.x).abs() < 0.22) {
+            final dx = (c.x - model.player.x).abs();
+            if (dx < 0.22) {
               audio.whoosh();
+            }
+            // Near-miss: very close pass grants combo and points
+            if (dx < 0.06) {
+              model.nearMissCombo += 1;
+              model.nearMissTimer = 2.0;
+              final bonus = 30 * model.nearMissCombo;
+              model.score += (bonus * model.multiplier).round();
+              _showBanner('NEAR MISS +$bonus');
             }
           }
           if (!c.passed && c.overtake && c.y >= model.player.y - 0.02) {
@@ -442,6 +503,13 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
               final base = 10 * math.max(1, model.combo ~/ 3);
               model.score += (base * model.multiplier).round();
               model.passed += 1;
+              model.overtakesDoneThisLevel += 1;
+              if (model.overtakesDoneThisLevel >= model.overtakesGoal) {
+                model.overtakesDoneThisLevel = 0;
+                model.overtakesGoal = (model.overtakesGoal + 5).clamp(10, 50);
+                model.multiplier += 1.0;
+                _showBanner('OVERTAKE QUOTA! +1x');
+              }
             }
             return true;
           }
@@ -454,7 +522,11 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
 
     // Collisions (only while running)
     final baseW = model.refRoadWidth > 0 ? model.refRoadWidth : road.width;
-    final pRect = model.player.toRect(road, baseW);
+    var pRect = model.player.toRect(road, baseW);
+    if (model.dangerMode) {
+      final shrink = baseW * 0.02;
+      pRect = pRect.deflate(shrink);
+    }
     // Hazards and pickups move only while running
     if (model.state == _GameState.running) {
       final groundFlow = (2.8 * model.speed) * _speedFactor;
@@ -492,7 +564,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
           model.invuln = 1.0; // grace window to avoid chain hits
           model.risk = 0.0; model.multiplier = 1.0; // reset multiplier on hit
           // Lose a life when hitting a hazard
-          model.lives = math.max(0, model.lives - 1);
+          _onLifeLost();
           if (model.lives <= 0) {
             model.state = _GameState.gameOver;
             model.hiScore = math.max(model.hiScore, model.score);
@@ -518,6 +590,16 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
               audio.beep(990, 80);
               audio.beep(1320, 80);
               break;
+            case _PickupType.nitro:
+              model.nitroHeat = math.max(model.nitroHeat, 0.2);
+              model.nitroActive = true;
+              model.nitroCooldown = 0.0;
+              _showBanner('NITRO!');
+              break;
+            case _PickupType.coin:
+              model.score += (20 * model.multiplier).round();
+              audio.beep(1200, 50);
+              break;
           }
           p.y = -1; // mark for removal
         }
@@ -532,7 +614,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
         model.invuln = 1.0;
         model.risk = 0.0; model.multiplier = 1.0;
         // Lose a life on traffic collision
-        model.lives = math.max(0, model.lives - 1);
+        _onLifeLost();
         if (model.lives <= 0) {
           model.state = _GameState.gameOver;
           model.hiScore = math.max(model.hiScore, model.score);
@@ -556,13 +638,40 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
           model.player.x -= 0.08;
         }
         // Lose a life on hard edge impact
-        model.lives = math.max(0, model.lives - 1);
+        _onLifeLost();
         if (model.lives <= 0) {
           model.state = _GameState.gameOver;
           model.hiScore = math.max(model.hiScore, model.score);
           audio.gameOver();
         }
       }
+    }
+
+    // Slipstream: behind a car boosts speed gradually
+    if (model.state == _GameState.running) {
+      bool drafting = false;
+      for (final c in model.traffic) {
+        final ahead = (c.y < model.player.y) && (model.player.y - c.y) < 0.12;
+        final dx = (c.x - model.player.x).abs();
+        if (ahead && dx < 0.1) { drafting = true; break; }
+      }
+      if (drafting) {
+        model.draftTimer = math.min(1.5, model.draftTimer + dt);
+        model.speed = (model.speed + 0.15 * dt).clamp(0.0, 1.0);
+      } else {
+        model.draftTimer = math.max(0.0, model.draftTimer - dt);
+      }
+      // Nitro heats up while active, cools otherwise
+      if (model.nitroActive && model.nitroCooldown <= 0) {
+        model.nitroHeat = math.min(1.0, model.nitroHeat + dt * 0.25);
+        model.speed = (model.speed + 0.25 * dt).clamp(0.0, 1.0);
+        if (model.nitroHeat >= 1.0) { model.nitroActive = false; model.nitroCooldown = 5.0; }
+      } else {
+        model.nitroHeat = math.max(0.0, model.nitroHeat - dt * 0.12);
+        if (model.nitroCooldown > 0) model.nitroCooldown = math.max(0.0, model.nitroCooldown - dt);
+      }
+      // Near-miss timer decay resets combo
+      if (model.nearMissTimer > 0) model.nearMissTimer = math.max(0.0, model.nearMissTimer - dt); else model.nearMissCombo = 0;
     }
 
     // Engine audio follow speed
@@ -573,6 +682,11 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
 
     // Painter-driven repaint each frame
     _repaint.value++;
+    // Decay banner timer
+    if (model.bannerTimer > 0) {
+      model.bannerTimer = math.max(0, model.bannerTimer - dt);
+      if (model.bannerTimer == 0) model.bannerText = null;
+    }
     // Only rebuild widget tree on state transitions (e.g., overlay changes)
     if (model.state != _lastState) {
       _lastState = model.state;
@@ -605,6 +719,13 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
     model.player.x = model.player.x.clamp(-1.0, 1.0);
   }
 
+  void _onLifeLost() {
+    model.lives = math.max(0, model.lives - 1);
+    // Reset perfect run and multiplier
+    model.perfectTime = 0.0;
+    model.multiplier = 1.0;
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -616,11 +737,18 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
     }
   }
 
+  void _showBanner(String text) {
+    model.bannerText = text;
+    model.bannerTimer = 1.5;
+  }
+
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onHorizontalDragUpdate: _onHorizontalDrag,
       onTap: _onTap,
+      onLongPressStart: (_) { model.dangerMode = true; },
+      onLongPressEnd: (_) { model.dangerMode = false; },
       child: LayoutBuilder(
         builder: (context, constraints) {
           final road = _roadRectForSize(Size(constraints.maxWidth, constraints.maxHeight));
@@ -689,9 +817,19 @@ class _LeMansPainter extends CustomPainter {
     // Central road area (implicit by the two bands drawn below)
     final leftBand = Rect.fromLTWH(road.left, 0, road.width * 0.5, size.height);
     final rightBand = Rect.fromLTWH(road.left + road.width * 0.5, 0, road.width * 0.36, size.height);
+    // Biome-tinted road
+    Color leftCol = C64Palette.roadBlue;
+    Color rightCol = C64Palette.roadPurple;
+    if (model.biome == 1) { // city: cooler blue/purple
+      leftCol = const Color(0xFF203A70);
+      rightCol = const Color(0xFF4B2A6B);
+    } else if (model.biome == 2) { // desert: warmer hues
+      leftCol = const Color(0xFF5B3A1E);
+      rightCol = const Color(0xFF6A4220);
+    }
     // Road base fill with dimming applied
-    canvas.drawRect(leftBand, Paint()..color = _dim(C64Palette.roadBlue));
-    canvas.drawRect(rightBand, Paint()..color = _dim(C64Palette.roadPurple));
+    canvas.drawRect(leftBand, Paint()..color = _dim(leftCol));
+    canvas.drawRect(rightBand, Paint()..color = _dim(rightCol));
 
     // Side strips
     final sideStripW = road.width * 0.04;
@@ -757,6 +895,22 @@ class _LeMansPainter extends CustomPainter {
           canvas.drawRect(Rect.fromCenter(center: r.center, width: plusW, height: plusT), Paint()..color = Colors.white);
           canvas.drawRect(Rect.fromCenter(center: r.center, width: plusT, height: plusW), Paint()..color = Colors.white);
           break;
+        case _PickupType.nitro:
+          final paint = Paint()..color = const Color(0xFF42A5F5);
+          canvas.drawRRect(RRect.fromRectAndRadius(r, const Radius.circular(3)), paint);
+          // lightning bolt
+          final path = Path()
+            ..moveTo(r.left + r.width*0.35, r.top + r.height*0.2)
+            ..lineTo(r.center.dx, r.center.dy)
+            ..lineTo(r.left + r.width*0.55, r.center.dy)
+            ..lineTo(r.right - r.width*0.2, r.bottom - r.height*0.2)
+            ..close();
+          canvas.drawPath(path, Paint()..color = Colors.white);
+          break;
+        case _PickupType.coin:
+          canvas.drawCircle(r.center, r.width*0.45, Paint()..color = const Color(0xFFFFC107));
+          canvas.drawCircle(r.center, r.width*0.25, Paint()..color = const Color(0xFFFFF59D));
+          break;
       }
     }
 
@@ -776,8 +930,8 @@ class _LeMansPainter extends CustomPainter {
       }
     }
 
-    // Headlights mask at night (skip in low graphics mode)
-    if (model.night > 0.4 && !model.config.lowGraphics) {
+    // Headlights mask at night (always on; simplified in low graphics)
+    if (model.night > 0.4) {
       final darkness = (model.night - 0.4) / 0.6; // 0..1
       _drawHeadlights(canvas, size, darkness);
       // Emissive tail lights so they visibly glow in the dark
@@ -789,22 +943,25 @@ class _LeMansPainter extends CustomPainter {
   }
 
   void _drawTailLightEmission(Canvas canvas) {
-    if (model.config.lowGraphics) return;
     // Extra emissive pass drawn after darkness to ensure visibility at night
     final n = ((model.night - 0.4) / 0.6).clamp(0.0, 1.0);
     if (n <= 0.0) return;
+    final int alpha = model.config.lowGraphics
+        ? (100 + (60 * n).round())
+        : (140 + (80 * n).round());
     final glow = Paint()
       ..blendMode = BlendMode.screen
-      ..color = Color.fromARGB((160 + 80 * n).round(), 255, 70, 70)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
+      ..color = Color.fromARGB(alpha.clamp(0, 255), 255, 70, 70)
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, model.config.lowGraphics ? 3 : 8);
     void drawFor(Rect r) {
       final tlW = r.width * 0.16;
       final tlH = r.height * 0.10;
       final y = r.bottom - tlH - r.height * 0.06;
       final left = Rect.fromLTWH(r.left + r.width * 0.08, y, tlW, tlH);
       final right = Rect.fromLTWH(r.right - r.width * 0.08 - tlW, y, tlW, tlH);
-      canvas.drawRect(left.inflate(5), glow);
-      canvas.drawRect(right.inflate(5), glow);
+      final glowInflate = model.config.lowGraphics ? 3.0 : 5.0;
+      canvas.drawRect(left.inflate(glowInflate), glow);
+      canvas.drawRect(right.inflate(glowInflate), glow);
     }
     // Traffic
     final baseW2 = model.refRoadWidth > 0 ? model.refRoadWidth : road.width;
@@ -920,17 +1077,21 @@ class _LeMansPainter extends CustomPainter {
       final right = Rect.fromLTWH(r.right - r.width * 0.08 - tlW, y, tlW, tlH);
       final n = ((model.night - 0.35) / 0.65).clamp(0.0, 1.0);
       // During day: dim lens only; at night: bright core + local glow (also reinforced post-overlay)
-      if (n <= 0.0 || model.config.lowGraphics) {
+      if (n <= 0.0) {
         final lens = Paint()..color = const Color(0xFF7A2020);
         canvas.drawRect(left, lens);
         canvas.drawRect(right, lens);
       } else {
+        final int alpha = model.config.lowGraphics
+            ? (120 + (50 * n).round())
+            : (170 + (70 * n).round());
         final glow = Paint()
-          ..color = Color.fromARGB((170 + 70 * n).round(), 255, 40, 40)
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
+          ..color = Color.fromARGB(alpha.clamp(0, 255), 255, 40, 40)
+          ..maskFilter = MaskFilter.blur(BlurStyle.normal, model.config.lowGraphics ? 2 : 6);
         final core = Paint()..color = const Color(0xFFFF4040);
-        canvas.drawRect(left.inflate(3), glow);
-        canvas.drawRect(right.inflate(3), glow);
+        final glowInflate = model.config.lowGraphics ? 2.0 : 3.0;
+        canvas.drawRect(left.inflate(glowInflate), glow);
+        canvas.drawRect(right.inflate(glowInflate), glow);
         canvas.drawRect(left, core);
         canvas.drawRect(right, core);
       }
@@ -1003,12 +1164,52 @@ class _LeMansPainter extends CustomPainter {
     final kmh = (model.speed * 120).round();
     drawText('   $kmh KM/H', styleWhite, y + h + 6);
 
+    // Multiplier badge below speed (only when > 1x)
+    if (model.multiplier > 1.0) {
+      final r = 14.0; // radius
+      final cx = right - r; // near right edge
+      final cy = y + h + 34; // below KM/H line
+      final badgePaint = Paint()..color = const Color(0xFFFF4040);
+      canvas.drawCircle(Offset(cx, cy), r, badgePaint);
+      final multiText = _hud.tp('${model.multiplier.toStringAsFixed(0)}x', const TextStyle(
+        fontFamily: 'VT323', fontSize: 16, fontWeight: FontWeight.w800, color: Colors.white,
+      ));
+      multiText.paint(canvas, Offset(cx - multiText.width / 2, cy - multiText.height / 2));
+    }
+    // Nitro heat indicator (thin bar)
+    if (model.nitroHeat > 0.01 || model.nitroCooldown > 0) {
+      y += 26;
+      drawText('NITRO', styleWhite, y);
+      final nh = model.nitroHeat.clamp(0.0, 1.0);
+      final barY = y + 16;
+      final nbBg = Paint()..color = Colors.white10;
+      final nbFg = Paint()..color = const Color(0xFFFF7043);
+      canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(x, barY, barW, 6), const Radius.circular(3)), nbBg);
+      canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(x, barY, barW * nh, 6), const Radius.circular(3)), nbFg);
+      y = barY + 8;
+    }
+
+    // Level and multiplier badges (top-right area, small)
+    // Multiplier text removed from top-right to avoid confusion near SCORE
+
     if (model.state == _GameState.gameOver) {
       final overlay = Paint()..color = const Color.fromARGB(140, 0, 0, 0);
       canvas.drawRect(Offset.zero & size, overlay);
     }
     // Hazard/traffic warnings: small arrows if something is close ahead
     _drawWarnings(canvas, size);
+
+    // Transient banner overlay
+    if (model.bannerTimer > 0 && model.bannerText != null) {
+      final text = _hud.tp(model.bannerText!, const TextStyle(fontFamily: 'VT323', fontSize: 22, fontWeight: FontWeight.w800, color: Colors.white), maxWidth: size.width * 0.9);
+      final fade = model.bannerTimer.clamp(0.0, 1.0);
+      final shadow = Paint()..color = Colors.black.withOpacity(0.6 * fade);
+      final yCenter = size.height * 0.25;
+      final x = (size.width - text.width) / 2;
+      // simple shadow
+      canvas.drawRect(Rect.fromLTWH(x - 6, yCenter - 4, text.width + 12, text.height + 8), shadow);
+      text.paint(canvas, Offset(x, yCenter));
+    }
   }
 
   void _drawTopLeftHud(Canvas canvas, Size size) {
@@ -1019,6 +1220,19 @@ class _LeMansPainter extends CustomPainter {
     hi.paint(canvas, Offset(leftX, topY));
     // Lives (top-left) — three car icons like old arcade machines
     _drawLives(canvas, size);
+    // Level under lives
+    final levelStyle = const TextStyle(fontFamily: 'VT323', fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white70);
+    final levelY = 44.0 + 32.0 + 10.0;
+    final lvl = _hud.tp('LEVEL ${model.level}', levelStyle, maxWidth: size.width * 0.5);
+    lvl.paint(canvas, Offset(14.0, levelY));
+    // Show overtake objective progress
+    final prog = _hud.tp('QUOTA ${model.overtakesDoneThisLevel}/${model.overtakesGoal}', const TextStyle(fontFamily: 'VT323', fontSize: 14, color: Colors.white54), maxWidth: size.width * 0.5);
+    prog.paint(canvas, Offset(14.0, levelY + 18));
+  }
+
+  void _showBanner(String text) {
+    model.bannerText = text;
+    model.bannerTimer = 1.5; // seconds
   }
 
   void _drawLives(Canvas canvas, Size size) {
@@ -1034,6 +1248,11 @@ class _LeMansPainter extends CustomPainter {
       final color = alive ? C64Palette.cyan : Colors.white24;
       _drawCar(canvas, rect, body: color);
     }
+    // Show level just below lives
+    final levelStyle = const TextStyle(fontFamily: 'VT323', fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white70);
+    final levelY = 44.0 + 32.0 + 10.0; // startY + h + gap from _drawLives geometry
+    final lvl = _hud.tp('LEVEL ${model.level}', levelStyle, maxWidth: size.width * 0.5);
+    lvl.paint(canvas, Offset(startX, levelY));
   }
 
   @override
@@ -1070,7 +1289,7 @@ class _LeMansPainter extends CustomPainter {
     final p = Paint()
       ..blendMode = BlendMode.dstOut
       ..color = Colors.white
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10);
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, model.config.lowGraphics ? 4 : 10);
     canvas.drawPath(leftCone, p);
     canvas.drawPath(rightCone, p);
     // Inner brighter cores
