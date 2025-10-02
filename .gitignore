@@ -1,2 +1,41 @@
 # Fastlane API key (do not commit)
+# Fastlane API key (do not commit)
 fastlane/api_key.json
+
+# Flutter/Dart
+.dart_tool/
+.packages
+.flutter-plugins
+.flutter-plugins-dependencies
+.metadata
+build/
+
+# iOS/macOS (Xcode)
+**/DerivedData/
+**/Pods/
+ios/Flutter/ephemeral/
+macos/Flutter/ephemeral/
+**/*.xcuserstate
+**/xcuserdata/
+
+# Android/Gradle
+android/.gradle/
+android/local.properties
+
+# IDE/editor
+.idea/
+.vscode/
+*.iml
+
+# OS-generated
+.DS_Store
+Thumbs.db
+
+# Fastlane outputs
+fastlane/build/
+fastlane/report.xml
+fastlane/Preview.html
+
+# Misc
+coverage/
+*.lock.hive
