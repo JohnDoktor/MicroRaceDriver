@@ -119,6 +119,8 @@ class _GameModel {
   int biome = 0;
   // Explosions
   final List<_Explosion> explosions = <_Explosion>[];
+  // Muzzle flash timer (seconds)
+  double muzzle = 0.0;
 }
 
 class _Skid {
@@ -324,6 +326,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
               model.bullets.add(_Bullet(model.player.x + sx, model.player.y + 0.02, 1.6));
             }
             model.fireCooldown = 1.0 / rate;
+            model.muzzle = 0.08; // brief muzzle flash
             audio.beep(1400, 20);
           }
         }
@@ -612,12 +615,13 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
     
     _clampPlayer();
 
-    // Explosions update
+    // Explosions + muzzle flash update
     if (model.state == _GameState.running) {
       for (final e in model.explosions) {
         e.t += dt;
       }
       model.explosions.removeWhere((e) => e.t > 0.4);
+      if (model.muzzle > 0) model.muzzle = math.max(0.0, model.muzzle - dt);
     }
 
     // Collisions (only while running)
@@ -727,16 +731,16 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
           final br = b.toRect(road, baseW);
           for (final car in model.traffic) {
             if (carsToRemove.contains(car)) continue;
-            if (br.overlaps(car.toRect(road, baseW))) {
+            final crNow = car.toRect(road, baseW);
+            if (br.overlaps(crNow)) {
               carsToRemove.add(car);
               bulletsToRemove.add(b);
               model.score += 100; // fixed 100 points per hit
               audio.beep(300, 50);
               // spawn simple explosion
-              final cr = car.toRect(road, baseW);
               explosions.add(_Explosion(
-                (cr.center.dx - road.center.dx) / (road.width * _kLaneXFactor),
-                1.0 - (road.bottom - cr.center.dy) / road.height,
+                (crNow.center.dx - road.center.dx) / (road.width * _kLaneXFactor),
+                (road.bottom - crNow.center.dy) / road.height,
               ));
               break;
             }
@@ -1108,6 +1112,21 @@ class _LeMansPainter extends CustomPainter {
     // Player car (flash when invulnerable)
     final pBody = _dim(const Color(0xFF7EB7FF));
     _drawCar(canvas, model.player.toRect(road, baseW), body: pBody, tailLights: true, headLights: true);
+    // Muzzle flash near the car nose
+    if (model.muzzle > 0) {
+      final pr = model.player.toRect(road, baseW);
+      final p = model.muzzle / 0.08; // 0..1
+      final flashLen = pr.height * (0.25 + 0.35 * (1 - p));
+      final flashW = pr.width * (0.15 + 0.25 * (1 - p));
+      final nose = Offset(pr.center.dx, pr.top - flashLen * 0.2);
+      final path = Path()
+        ..moveTo(nose.dx, pr.top - flashLen)
+        ..lineTo(nose.dx - flashW * 0.5, pr.top - flashLen * 0.3)
+        ..lineTo(nose.dx + flashW * 0.5, pr.top - flashLen * 0.3)
+        ..close();
+      final col = Color.fromARGB((180 * (1 - p)).round(), 255, 230, 120);
+      canvas.drawPath(path, Paint()..color = col);
+    }
     if (model.invuln > 0) {
       final flash = (math.sin(model.scroll * 0.1) > 0) ? 160 : 0;
       if (flash > 0) {
