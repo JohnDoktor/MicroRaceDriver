@@ -65,6 +65,8 @@ class _GameModel {
   bool fuelOutActive = false; // decelerating due to empty fuel
   // Weapons
   int gunLevel = 0; // 0 = none; higher = stronger gun
+  final List<_Bullet> bullets = <_Bullet>[];
+  double fireCooldown = 0.0;
   double comboTimer = 0.0; int combo = 0;
   double shake = 0.0; // camera shake time
   GameConfig config = const GameConfig();
@@ -150,6 +152,21 @@ class _Pickup {
     final s = widthRef * 0.1;
     final bottom = road.bottom - y * road.height;
     return Rect.fromCenter(center: Offset(cx, bottom - s * 0.5), width: s, height: s);
+  }
+}
+
+class _Bullet {
+  double x; // -1..1 (lane normalized)
+  double y; // 0..1 from bottom to top
+  double speed; // normalized units per second
+  _Bullet(this.x, this.y, this.speed);
+  Rect toRect(Rect road, double baseWidth) {
+    final cx = road.center.dx + x * (road.width * _kLaneXFactor);
+    final widthRef = baseWidth <= 0 ? road.width : baseWidth;
+    final w = widthRef * 0.035;
+    final h = widthRef * 0.08;
+    final bottom = road.bottom - y * road.height;
+    return Rect.fromCenter(center: Offset(cx, bottom - h * 0.5), width: w, height: h);
   }
 }
 
@@ -292,6 +309,22 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
         if (model.swipeHint && model.elapsed >= 3.0) {
           model.swipeHint = false;
           if (mounted) setState(() {}); // remove hint overlay
+        }
+        // Auto-fire if armed
+        if (model.gunLevel > 0) {
+          model.fireCooldown -= dt;
+          final rate = 5.0 + 2.0 * model.gunLevel; // bullets per second
+          if (model.fireCooldown <= 0) {
+            // Fire one or more bullets depending on level (simple spread)
+            final spreads = <double>[0.0];
+            if (model.gunLevel >= 3) spreads.addAll([-0.12, 0.12]);
+            if (model.gunLevel >= 5) spreads.addAll([-0.24, 0.24]);
+            for (final sx in spreads) {
+              model.bullets.add(_Bullet(model.player.x + sx, model.player.y + 0.02, 1.6));
+            }
+            model.fireCooldown = 1.0 / rate;
+            audio.beep(1400, 20);
+          }
         }
         // Level up every 120s of runtime
         final newLevel = 1 + (model.elapsed ~/ 120);
@@ -596,6 +629,11 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
         p.y -= dt * groundFlow;
       }
       model.pickups.removeWhere((p) => p.y < -0.2);
+      // Bullets move upward; advance and cull
+      for (final b in model.bullets) {
+        b.y += dt * (b.speed + (2.8 * model.speed) * _speedFactor); // move up relative to ground
+      }
+      model.bullets.removeWhere((b) => b.y > 1.2);
     }
 
     if (model.state == _GameState.running) {
@@ -671,8 +709,30 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
         }
       }
       model.pickups.removeWhere((p) => p.y < 0);
-    for (final car in model.traffic) {
-      if (model.invuln <= 0 && car.toRect(road, baseW).deflate(baseW * 0.02).overlaps(pRect.deflate(baseW * 0.02))) {
+      // Bullet vs traffic collisions
+      if (model.bullets.isNotEmpty && model.traffic.isNotEmpty) {
+        final bulletsToRemove = <_Bullet>[];
+        final carsToRemove = <_Car>[];
+        for (final b in model.bullets) {
+          final br = b.toRect(road, baseW);
+          for (final car in model.traffic) {
+            if (carsToRemove.contains(car)) continue;
+            if (br.overlaps(car.toRect(road, baseW))) {
+              carsToRemove.add(car);
+              bulletsToRemove.add(b);
+              model.score += (40 * model.multiplier).round();
+              audio.beep(300, 50);
+              break;
+            }
+          }
+        }
+        if (carsToRemove.isNotEmpty) {
+          model.traffic.removeWhere((c) => carsToRemove.contains(c));
+          model.bullets.removeWhere((bb) => bulletsToRemove.contains(bb));
+        }
+      }
+      for (final car in model.traffic) {
+        if (model.invuln <= 0 && car.toRect(road, baseW).deflate(baseW * 0.02).overlaps(pRect.deflate(baseW * 0.02))) {
         // Simple collision penalty
         model.speed = 0.2;
         audio.crash();
@@ -997,6 +1057,12 @@ class _LeMansPainter extends CustomPainter {
           canvas.drawRect(grip, Paint()..color = Colors.white);
           break;
       }
+    }
+
+    // Bullets (draw after pickups, before cars)
+    for (final b in model.bullets) {
+      final r = b.toRect(road, baseW);
+      canvas.drawRRect(RRect.fromRectAndRadius(r, const Radius.circular(2)), Paint()..color = Colors.white);
     }
 
     // Traffic
