@@ -478,11 +478,12 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
         model.pickupCooldown = base;
         final lane = (rng.nextInt(3) - 1) * 0.5;
         final roll = rng.nextDouble();
-        if (roll < 0.6) {
+        // Debug: make gun cradle ~10x more frequent than before (≈90%)
+        if (roll < 0.05) {
           model.pickups.add(_Pickup(_PickupType.fuel, lane.toDouble(), 1.05));
-        } else if (roll < 0.8) {
+        } else if (roll < 0.10) {
           model.pickups.add(_Pickup(_PickupType.nitro, lane.toDouble(), 1.05));
-        } else if (roll < 0.9) {
+        } else if (roll < 0.95) {
           model.pickups.add(_Pickup(_PickupType.gun, lane.toDouble(), 1.05));
         } else {
           // coin line across lanes
