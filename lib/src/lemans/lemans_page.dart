@@ -117,6 +117,8 @@ class _GameModel {
   bool dangerMode = false;
   // Biome visual index
   int biome = 0;
+  // Explosions
+  final List<_Explosion> explosions = <_Explosion>[];
 }
 
 class _Skid {
@@ -163,7 +165,7 @@ class _Bullet {
   Rect toRect(Rect road, double baseWidth) {
     final cx = road.center.dx + x * (road.width * _kLaneXFactor);
     final widthRef = baseWidth <= 0 ? road.width : baseWidth;
-    final w = widthRef * 0.035;
+    final w = widthRef * 0.0175; // half previous width for slimmer projectiles
     final h = widthRef * 0.08;
     final bottom = road.bottom - y * road.height;
     return Rect.fromCenter(center: Offset(cx, bottom - h * 0.5), width: w, height: h);
@@ -310,15 +312,14 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
           model.swipeHint = false;
           if (mounted) setState(() {}); // remove hint overlay
         }
-        // Auto-fire if armed
+        // Auto-fire if armed (slower base rate, add spread at L2/L4)
         if (model.gunLevel > 0) {
           model.fireCooldown -= dt;
-          final rate = 5.0 + 2.0 * model.gunLevel; // bullets per second
+          final rate = 3.0 + 1.0 * (model.gunLevel - 1).clamp(0, 10); // bullets per second
           if (model.fireCooldown <= 0) {
-            // Fire one or more bullets depending on level (simple spread)
             final spreads = <double>[0.0];
-            if (model.gunLevel >= 3) spreads.addAll([-0.12, 0.12]);
-            if (model.gunLevel >= 5) spreads.addAll([-0.24, 0.24]);
+            if (model.gunLevel >= 2) spreads.addAll([-0.08, 0.08]);
+            if (model.gunLevel >= 4) spreads.addAll([-0.18, 0.18]);
             for (final sx in spreads) {
               model.bullets.add(_Bullet(model.player.x + sx, model.player.y + 0.02, 1.6));
             }
@@ -611,6 +612,14 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
     
     _clampPlayer();
 
+    // Explosions update
+    if (model.state == _GameState.running) {
+      for (final e in model.explosions) {
+        e.t += dt;
+      }
+      model.explosions.removeWhere((e) => e.t > 0.4);
+    }
+
     // Collisions (only while running)
     final baseW = model.refRoadWidth > 0 ? model.refRoadWidth : road.width;
     var pRect = model.player.toRect(road, baseW);
@@ -713,6 +722,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
       if (model.bullets.isNotEmpty && model.traffic.isNotEmpty) {
         final bulletsToRemove = <_Bullet>[];
         final carsToRemove = <_Car>[];
+        final explosions = <_Explosion>[];
         for (final b in model.bullets) {
           final br = b.toRect(road, baseW);
           for (final car in model.traffic) {
@@ -720,8 +730,14 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
             if (br.overlaps(car.toRect(road, baseW))) {
               carsToRemove.add(car);
               bulletsToRemove.add(b);
-              model.score += (40 * model.multiplier).round();
+              model.score += 100; // fixed 100 points per hit
               audio.beep(300, 50);
+              // spawn simple explosion
+              final cr = car.toRect(road, baseW);
+              explosions.add(_Explosion(
+                (cr.center.dx - road.center.dx) / (road.width * _kLaneXFactor),
+                1.0 - (road.bottom - cr.center.dy) / road.height,
+              ));
               break;
             }
           }
@@ -729,6 +745,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
         if (carsToRemove.isNotEmpty) {
           model.traffic.removeWhere((c) => carsToRemove.contains(c));
           model.bullets.removeWhere((bb) => bulletsToRemove.contains(bb));
+          model.explosions.addAll(explosions);
         }
       }
       for (final car in model.traffic) {
@@ -1063,6 +1080,23 @@ class _LeMansPainter extends CustomPainter {
     for (final b in model.bullets) {
       final r = b.toRect(road, baseW);
       canvas.drawRRect(RRect.fromRectAndRadius(r, const Radius.circular(2)), Paint()..color = Colors.white);
+    }
+
+    // Explosions (simple expanding ring)
+    for (final e in model.explosions) {
+      final cx = road.center.dx + e.x * (road.width * _kLaneXFactor);
+      final cy = road.bottom - e.y * road.height;
+      final p = e.t / 0.4; // 0..1
+      final radius = (baseW * 0.06) * (0.5 + 1.2 * p);
+      final alpha = (1.0 - p).clamp(0.0, 1.0);
+      final col = Color.fromARGB((alpha * 200).round(), 255, (180 + 60 * (1 - alpha)).round(), 0);
+      final ring = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2 + 4 * (1 - alpha)
+        ..color = col;
+      final fill = Paint()..color = col.withValues(alpha: alpha * 0.2);
+      canvas.drawCircle(Offset(cx, cy), radius, fill);
+      canvas.drawCircle(Offset(cx, cy), radius, ring);
     }
 
     // Traffic
@@ -2177,3 +2211,9 @@ class LeMansPage extends StatelessWidget {
 
 
 // (swipe-only) on-screen button widget removed
+class _Explosion {
+  double x; // -1..1
+  double y; // 0..1
+  double t = 0.0; // seconds since start
+  _Explosion(this.x, this.y);
+}
