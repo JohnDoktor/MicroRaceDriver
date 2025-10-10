@@ -63,6 +63,8 @@ class _GameModel {
   double fuel = 100.0; // 0..100
   bool fuelOutHandled = false; // prevents repeated life loss when fuel hits 0
   bool fuelOutActive = false; // decelerating due to empty fuel
+  // Weapons
+  int gunLevel = 0; // 0 = none; higher = stronger gun
   double comboTimer = 0.0; int combo = 0;
   double shake = 0.0; // camera shake time
   GameConfig config = const GameConfig();
@@ -121,7 +123,7 @@ class _Skid {
 }
 
 enum _HazardType { oil, puddle }
-enum _PickupType { fuel, life, nitro, coin }
+enum _PickupType { fuel, life, nitro, coin, gun }
 
 class _Hazard {
   final _HazardType type;
@@ -467,7 +469,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
         final type = rng.nextBool() ? _HazardType.oil : _HazardType.puddle;
         model.hazards.add(_Hazard(type, lane, 1.05));
       }
-      // Fuel/Nitro/Coin pickups: spawn more frequently overall, and slightly more over time
+      // Fuel/Nitro/Coin/Gun pickups: spawn more frequently overall, and slightly more over time
       final pickupIntensity = 1.0 + minutes * 0.20; // modest ramp
       model.pickupCooldown -= dt * (0.35 + model.speed * 0.7) * _speedFactor * pickupIntensity;
       if (model.pickupCooldown <= 0) {
@@ -476,10 +478,12 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
         model.pickupCooldown = base;
         final lane = (rng.nextInt(3) - 1) * 0.5;
         final roll = rng.nextDouble();
-        if (roll < 0.7) {
+        if (roll < 0.6) {
           model.pickups.add(_Pickup(_PickupType.fuel, lane.toDouble(), 1.05));
-        } else if (roll < 0.9) {
+        } else if (roll < 0.8) {
           model.pickups.add(_Pickup(_PickupType.nitro, lane.toDouble(), 1.05));
+        } else if (roll < 0.9) {
+          model.pickups.add(_Pickup(_PickupType.gun, lane.toDouble(), 1.05));
         } else {
           // coin line across lanes
           for (final l in [-0.5, 0.0, 0.5]) {
@@ -654,6 +658,13 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
               model.score += (20 * model.multiplier).round();
               audio.beep(1200, 50);
               break;
+            case _PickupType.gun:
+              // First time gives a basic gun, subsequent pickups level it up
+              model.gunLevel = (model.gunLevel == 0) ? 1 : (model.gunLevel + 1).clamp(1, 5);
+              _showBanner('GUN LVL ${model.gunLevel}');
+              audio.beep(760, 60);
+              audio.beep(540, 60);
+              break;
           }
           p.y = -1; // mark for removal
         }
@@ -782,6 +793,8 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
     // Reset perfect run and multiplier
     model.perfectTime = 0.0;
     model.multiplier = 1.0;
+    // Lose weapon
+    model.gunLevel = 0;
   }
 
   @override
@@ -972,6 +985,15 @@ class _LeMansPainter extends CustomPainter {
         case _PickupType.coin:
           canvas.drawCircle(r.center, r.width*0.45, Paint()..color = const Color(0xFFFFC107));
           canvas.drawCircle(r.center, r.width*0.25, Paint()..color = const Color(0xFFFFF59D));
+          break;
+        case _PickupType.gun:
+          // Gun cradle: dark purple box with white barrel icon
+          final paint = Paint()..color = const Color(0xFF8A56FF);
+          canvas.drawRRect(RRect.fromRectAndRadius(r, const Radius.circular(3)), paint);
+          final barrel = Rect.fromLTWH(r.left + r.width*0.2, r.top + r.height*0.4, r.width*0.6, r.height*0.18);
+          final grip = Rect.fromLTWH(r.left + r.width*0.55, r.top + r.height*0.52, r.width*0.15, r.height*0.25);
+          canvas.drawRect(barrel, Paint()..color = Colors.white);
+          canvas.drawRect(grip, Paint()..color = Colors.white);
           break;
       }
     }
