@@ -16,6 +16,7 @@ class _MenuPageState extends State<MenuPage> with TickerProviderStateMixin {
   bool _musicEnabled = true;
   bool _sfxEnabled = true;
   final bool _lowGraphics = true;
+  bool _debugGunCradles = true; // keep current debug behavior by default
   late final AnimationController _parallaxCtl;
   late final AnimationController _fadeCtl;
   late final Future<String?> _bgFuture;
@@ -128,6 +129,18 @@ class _MenuPageState extends State<MenuPage> with TickerProviderStateMixin {
                   ],
                 ),
               ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12.0),
+                child: Row(
+                  children: [
+                    Checkbox(
+                      value: _debugGunCradles,
+                      onChanged: (v) => setState(() => _debugGunCradles = v ?? false),
+                    ),
+                    const Text('Debug: Gun spawns ++', style: TextStyle(fontFamily: 'VT323', fontSize: 18, color: Colors.white70)),
+                  ],
+                ),
+              ),
               // Low Graphics forced on; option hidden for simplicity
               // Test sound button removed
               const SizedBox(height: 32),
@@ -138,6 +151,7 @@ class _MenuPageState extends State<MenuPage> with TickerProviderStateMixin {
                       musicEnabled: _musicEnabled,
                       sfxEnabled: _sfxEnabled,
                       lowGraphics: _lowGraphics,
+                      debugGunCradles: _debugGunCradles,
                     )),
                   ));
                 },

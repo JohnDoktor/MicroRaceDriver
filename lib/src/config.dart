@@ -6,6 +6,7 @@ class GameConfig {
   final bool musicEnabled;
   final bool sfxEnabled;
   final bool lowGraphics;   // reduce visuals for performance
+  final bool debugGunCradles; // if true, spawn gun pickup very frequently
   const GameConfig({
     this.controlMode = ControlMode.both,
     this.difficulty = 1.0,
@@ -14,6 +15,7 @@ class GameConfig {
     this.musicEnabled = true,
     this.sfxEnabled = true,
     this.lowGraphics = false,
+    this.debugGunCradles = false,
   });
 }
 

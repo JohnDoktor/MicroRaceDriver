@@ -515,17 +515,31 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
         model.pickupCooldown = base;
         final lane = (rng.nextInt(3) - 1) * 0.5;
         final roll = rng.nextDouble();
-        // Debug: make gun cradle ~10x more frequent than before (≈90%)
-        if (roll < 0.05) {
-          model.pickups.add(_Pickup(_PickupType.fuel, lane.toDouble(), 1.05));
-        } else if (roll < 0.10) {
-          model.pickups.add(_Pickup(_PickupType.nitro, lane.toDouble(), 1.05));
-        } else if (roll < 0.95) {
-          model.pickups.add(_Pickup(_PickupType.gun, lane.toDouble(), 1.05));
+        if (model.config.debugGunCradles) {
+          // Debug: make gun cradle very frequent (≈90%)
+          if (roll < 0.05) {
+            model.pickups.add(_Pickup(_PickupType.fuel, lane.toDouble(), 1.05));
+          } else if (roll < 0.10) {
+            model.pickups.add(_Pickup(_PickupType.nitro, lane.toDouble(), 1.05));
+          } else if (roll < 0.95) {
+            model.pickups.add(_Pickup(_PickupType.gun, lane.toDouble(), 1.05));
+          } else {
+            for (final l in [-0.5, 0.0, 0.5]) {
+              model.pickups.add(_Pickup(_PickupType.coin, l.toDouble(), 1.05 + rng.nextDouble() * 0.05));
+            }
+          }
         } else {
-          // coin line across lanes
-          for (final l in [-0.5, 0.0, 0.5]) {
-            model.pickups.add(_Pickup(_PickupType.coin, l.toDouble(), 1.05 + rng.nextDouble() * 0.05));
+          // Normal distributions: Fuel 60%, Nitro 20%, Gun 10%, Coin 10%
+          if (roll < 0.6) {
+            model.pickups.add(_Pickup(_PickupType.fuel, lane.toDouble(), 1.05));
+          } else if (roll < 0.8) {
+            model.pickups.add(_Pickup(_PickupType.nitro, lane.toDouble(), 1.05));
+          } else if (roll < 0.9) {
+            model.pickups.add(_Pickup(_PickupType.gun, lane.toDouble(), 1.05));
+          } else {
+            for (final l in [-0.5, 0.0, 0.5]) {
+              model.pickups.add(_Pickup(_PickupType.coin, l.toDouble(), 1.05 + rng.nextDouble() * 0.05));
+            }
           }
         }
       }
@@ -1394,6 +1408,13 @@ class _LeMansPainter extends CustomPainter {
       canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(x, barY, barW, 6), const Radius.circular(3)), nbBg);
       canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(x, barY, barW * nh, 6), const Radius.circular(3)), nbFg);
       y = barY + 8;
+    }
+
+    // Gun level indicator
+    if (model.gunLevel > 0) {
+      y += 8;
+      drawText('GUN L${model.gunLevel}', styleWhite, y);
+      y += 18;
     }
 
     // Level and multiplier badges (top-right area, small)
