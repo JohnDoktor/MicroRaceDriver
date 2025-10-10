@@ -1,0 +1,10 @@
+RaceDriver is a retro-inspired arcade racer with chunky pixels,
+custom-painted road and cars, hazards, pickups, and a C64-style palette.
+
+Features
+- Classic countdown → race → game over flow
+- Hazards (oil/puddles), pickups (fuel/life/nitro/coin)
+- Nitro boost, slipstream, near-miss combos
+- Day/night cycle, road width dynamics, level progression
+
+Tip: Swipe to steer.

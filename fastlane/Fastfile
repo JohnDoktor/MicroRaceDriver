@@ -352,3 +352,42 @@ platform :ios do
     )
   end
 end
+
+platform :android do
+  desc "Build Android App Bundle (prod)"
+  lane :build do
+    sh("flutter", "clean")
+    sh("flutter", "pub", "get")
+    sh("flutter", "build", "appbundle", "--release", "--flavor", "prod")
+  end
+
+  desc "Upload Android AAB to Internal testing on Google Play"
+  lane :upload_internal do |options|
+    # Locate service account JSON via env or file
+    json_key_path = options[:json_key_path] || ENV['PLAY_JSON_PATH'] || File.exist?("fastlane/play.json") && "fastlane/play.json"
+    json_key_data = ENV['PLAY_JSON']
+    aab_path = options[:aab] || "build/app/outputs/bundle/prodRelease/app-prod-release.aab"
+
+    UI.user_error!("AAB not found at #{aab_path}") unless File.exist?(aab_path)
+    if json_key_data.nil? && (json_key_path.nil? || !File.exist?(json_key_path))
+      UI.user_error!("Provide Google Play service account JSON via PLAY_JSON env or play.json at fastlane/play.json")
+    end
+
+    supply(
+      package_name: "dk.johndoktor.racedriver",
+      aab: aab_path,
+      track: "internal",
+      json_key: json_key_path,
+      json_key_data: json_key_data,
+      skip_upload_images: true,
+      skip_upload_screenshots: true,
+      skip_upload_metadata: true
+    )
+  end
+
+  desc "Build and upload to Internal testing"
+  lane :internal do
+    build
+    upload_internal
+  end
+end

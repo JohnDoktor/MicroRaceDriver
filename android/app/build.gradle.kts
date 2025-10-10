@@ -5,6 +5,8 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+import java.util.Properties
+
 android {
     namespace = "dk.johndoktor.racedriver"
     compileSdk = flutter.compileSdkVersion
@@ -30,6 +32,26 @@ android {
         versionName = flutter.versionName
     }
 
+    // Signing: use release keystore if present, otherwise fall back to debug keys
+    signingConfigs {
+        create("release") {
+            val keystorePropsFile = rootProject.file("keystore.properties")
+            if (keystorePropsFile.exists()) {
+                val props = Properties()
+                keystorePropsFile.inputStream().use { props.load(it) }
+                val storePath = props.getProperty("storeFile")
+                if (storePath != null) {
+                    storeFile = file(storePath)
+                }
+                storePassword = props.getProperty("storePassword")
+                keyAlias = props.getProperty("keyAlias")
+                keyPassword = props.getProperty("keyPassword")
+            } else {
+                initWith(getByName("debug"))
+            }
+        }
+    }
+
     flavorDimensions += "env"
     productFlavors {
         create("dev") {
@@ -38,13 +60,16 @@ android {
             versionNameSuffix = "-dev"
             resValue("string", "app_name", "RaceDriver Dev")
         }
+        create("prod") {
+            dimension = "env"
+            // No suffix; production package id matches defaultConfig.applicationId
+            resValue("string", "app_name", "RaceDriver")
+        }
     }
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 }

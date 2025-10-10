@@ -61,6 +61,8 @@ class _GameModel {
   int countdownTick = 3; // last whole number observed
   int passed = 0;
   double fuel = 100.0; // 0..100
+  bool fuelOutHandled = false; // prevents repeated life loss when fuel hits 0
+  bool fuelOutActive = false; // decelerating due to empty fuel
   double comboTimer = 0.0; int combo = 0;
   double shake = 0.0; // camera shake time
   GameConfig config = const GameConfig();
@@ -272,12 +274,18 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
           model.speed = 0.0;
           model.elapsed = 0.0;
           model.swipeHint = true; // show hint at start of run
+          model.fuelOutHandled = false; // allow future out-of-fuel handling
+          model.fuelOutActive = false;
           audio.beep(880, 140); // go beep
         }
         break;
       case _GameState.running:
-        // target speed ramps to 1.0
-        model.speed = (model.speed + dt * 0.25 / model.config.difficulty).clamp(0.0, 1.0);
+        // Speed control: accelerate normally unless out of fuel (then decelerate)
+        if (model.fuelOutActive) {
+          model.speed = math.max(0.0, model.speed - dt * 0.6);
+        } else {
+          model.speed = (model.speed + dt * 0.25 / model.config.difficulty).clamp(0.0, 1.0);
+        }
         model.elapsed += dt; // accumulate runtime for progressive difficulty
         if (model.swipeHint && model.elapsed >= 3.0) {
           model.swipeHint = false;
@@ -295,8 +303,36 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
         }
         // Fuel consumption scales with speed and difficulty (+danger mode drain)
         final drainFactor = model.dangerMode ? 1.6 : 1.0;
+        final prevFuel = model.fuel;
         model.fuel -= dt * (0.5 + model.speed * 1.2) * model.config.difficulty * drainFactor;
         if (model.fuel < 0) model.fuel = 0;
+        // Out of fuel: start decelerating with banner; finalize when stopped
+        if (prevFuel > 0 && model.fuel <= 0 && !model.fuelOutHandled && !model.fuelOutActive) {
+          model.fuelOutActive = true;
+          model.bannerText = 'OUT OF FUEL';
+          model.bannerTimer = 0.6;
+        }
+        if (model.fuelOutActive) {
+          // Refresh banner to keep it visible while slowing down
+          model.bannerText = 'OUT OF FUEL';
+          model.bannerTimer = 0.3;
+          if (model.speed <= 0.05) {
+            model.fuelOutActive = false;
+            model.fuelOutHandled = true;
+            _onLifeLost();
+            if (model.lives <= 0) {
+              model.state = _GameState.gameOver;
+              model.hiScore = math.max(model.hiScore, model.score);
+              audio.gameOver();
+            } else {
+              model.fuel = 50.0;
+              model.state = _GameState.countdown;
+              model.countdown = 3.0;
+              model.invuln = 1.0;
+              model.speed = 0.0;
+            }
+          }
+        }
         // Perfect run timer -> every full minute increases multiplier by 1x
         model.perfectTime += dt;
         final targetMult = 1 + (model.perfectTime ~/ 60);
@@ -594,6 +630,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
           switch (p.type) {
             case _PickupType.fuel:
               model.fuel = math.min(100.0, model.fuel + 25);
+              if (model.fuel > 0) { model.fuelOutHandled = false; model.fuelOutActive = false; }
               model.score += 50;
               audio.beep(880, 70);
               audio.beep(660, 70);
