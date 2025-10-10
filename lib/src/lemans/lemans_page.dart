@@ -750,7 +750,8 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
               carsToRemove.add(car);
               bulletsToRemove.add(b);
               model.score += 100; // fixed 100 points per hit
-              audio.beep(300, 50);
+              audio.explosion();
+              model.shake = math.max(model.shake, 0.08);
               // spawn simple explosion
               explosions.add(_Explosion(
                 (crNow.center.dx - road.center.dx) / (road.width * _kLaneXFactor),
@@ -771,6 +772,7 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
         // Simple collision penalty
         model.speed = 0.2;
         audio.crash();
+        audio.explosion();
         model.shake = 0.25;
         model.invuln = 1.0;
         model.risk = 0.0; model.multiplier = 1.0;
@@ -1115,6 +1117,17 @@ class _LeMansPainter extends CustomPainter {
       final fill = Paint()..color = col.withValues(alpha: alpha * 0.2);
       canvas.drawCircle(Offset(cx, cy), radius, fill);
       canvas.drawCircle(Offset(cx, cy), radius, ring);
+      // simple debris spokes
+      final debris = Paint()..color = col..strokeWidth = 2;
+      const spokeCount = 6;
+      for (int i = 0; i < spokeCount; i++) {
+        final ang = (i / spokeCount) * 2 * math.pi + p * 0.8;
+        final r1 = radius * 0.3;
+        final r2 = radius * 0.9;
+        final a = Offset(cx + r1 * math.cos(ang), cy + r1 * math.sin(ang));
+        final b = Offset(cx + r2 * math.cos(ang), cy + r2 * math.sin(ang));
+        canvas.drawLine(a, b, debris);
+      }
     }
 
     // Traffic
@@ -1678,6 +1691,19 @@ class _Audio {
       final c = await _writeTempWav(_sineWavBytes(freq: 330, ms: 180, vol: 0.6 * sfxVolume), prefix: 'go3');
       await p.play(DeviceFileSource(c));
       await Future.delayed(const Duration(milliseconds: 500));
+      await p.stop();
+      p.dispose();
+    } catch (_) {}
+  }
+
+  Future<void> explosion() async {
+    // short white-noise burst for explosions
+    if (sfxVolume <= 0) return;
+    try {
+      final p = AudioPlayer()..setPlayerMode(PlayerMode.lowLatency);
+      final n1 = await _writeTempWav(_noiseWavBytes(ms: 90, vol: 0.8 * sfxVolume), prefix: 'exp1');
+      await p.play(DeviceFileSource(n1));
+      await Future.delayed(const Duration(milliseconds: 100));
       await p.stop();
       p.dispose();
     } catch (_) {}
