@@ -65,7 +65,35 @@
 - App: `dk.johndoktor.racedriver`
 - Dev: `dk.johndoktor.racedriver.dev`
 
-Status last updated: Level system, perfect-run multiplier, countdown on Continue; headlight cones + tail glows visible in low graphics; HUD updates (level under lives, multiplier badge); performance refactors; TestFlight build 1.0.0 (8) uploaded.
+Status last updated: iOS 1.0.1 (12) uploaded to TestFlight; Android AAB 1.0.1 (12) built and ready for Play; audio system prewarmed/cached; iOS build fixes landed.
+
+**Current Release State**
+- iOS/TestFlight
+  - Version: 1.0.1 (Build 12)
+  - Upload: succeeded via altool (Delivery UUID available in logs)
+  - Notes: Xcode may show stale session warning for `ek@nexus.dk` (safe to ignore); signing uses `john@johndoktor.dk` / Team `LD8P6KKV6Q`.
+- Android/Google Play
+  - AAB built: `build/app/outputs/bundle/prodRelease/app-prod-release.aab`
+  - Keystore: present and configured (upload-keystore.jks)
+  - Pending: Service account JSON (`fastlane/play.json`) to enable automated upload; otherwise manual upload via Play Console.
+
+**How to Publish (Quick)**
+- iOS: `flutter build ipa` → `build/ios/ipa/*.ipa` → upload via Transporter or `altool`.
+- Android: `flutter build appbundle --release --flavor prod` → `build/app/outputs/bundle/prodRelease/*.aab` → upload in Play Console (or `fastlane android internal` with `fastlane/play.json`).
+
+**Next Session TODOs**
+- Google Play
+  - Provide/create service account JSON, save as `fastlane/play.json`.
+  - Run `fastlane android internal` (or switch to beta/production track as needed).
+  - If Play reports higher versionCode: bump `pubspec.yaml` `+code`, rebuild AAB, re-upload.
+- iOS/TestFlight
+  - Optionally wire `fastlane ios beta` with `BETA_FEEDBACK_EMAIL` to auto-distribute to a group.
+  - Prepare release notes and submit to review if targeting App Store release.
+- Codebase follow-ups
+  - Minor lint: remove unnecessary cast at `lib/src/lemans/lemans_page.dart:1974`.
+  - Consider persistence for Music/SFX toggles (SharedPreferences).
+
+See also: `RELEASE.md` for the full step-by-step publishing guide.
 
 **Publish Instructions**
 - iOS/TestFlight:
