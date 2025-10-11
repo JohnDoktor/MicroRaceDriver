@@ -66,3 +66,40 @@
 - Dev: `dk.johndoktor.racedriver.dev`
 
 Status last updated: Level system, perfect-run multiplier, countdown on Continue; headlight cones + tail glows visible in low graphics; HUD updates (level under lives, multiplier badge); performance refactors; TestFlight build 1.0.0 (8) uploaded.
+
+**Publish Instructions**
+- iOS/TestFlight:
+  - Prereqs: Xcode signed into `john@johndoktor.dk` (Team `LD8P6KKV6Q`), Apple Distribution cert installed; keep `ek@nexus.dk` if needed (harmless login warnings).
+  - Versioning: bump `pubspec.yaml` `version: <name>+<code>`; ensure `<name>` increases for App Store (e.g., 1.0.2) and `<code>` increments (e.g., +13).
+  - Build IPA:
+    - `flutter clean && flutter pub get && flutter build ipa`
+    - Output: `build/ios/ipa/race_driver.ipa` (or `Runner.ipa` depending on Flutter version)
+  - Upload options:
+    - Transporter app: drag `build/ios/ipa/*.ipa`
+    - CLI: `xcrun altool --upload-app -f build/ios/ipa/*.ipa -t ios --apiKey <key_id> --apiIssuer <issuer_id>`
+    - Fastlane: `fastlane ios release` or `fastlane ios upload` (uses `fastlane/api_key.json`)
+  - Notes/Troubleshooting:
+    - “Invalid Pre-Release Train … 1.0.0 is closed”: bump `CFBundleShortVersionString` by editing `pubspec.yaml` version name, rebuild IPA.
+    - “No signing certificate 'iOS Distribution' found”: Xcode → Settings → Accounts → your Apple ID → Manage Certificates… → add Apple Distribution.
+    - Stale account warnings for `ek@nexus.dk` are safe; sign in again to silence.
+
+- Android/Google Play:
+  - Versioning: Android `versionCode` comes from the `+` number in `pubspec.yaml`, `versionName` from the left side; each upload must increase `versionCode`.
+  - Build AAB (prod flavor):
+    - `flutter clean && flutter pub get && flutter build appbundle --release --flavor prod`
+    - Output: `build/app/outputs/bundle/prodRelease/app-prod-release.aab`
+  - Signing: uses `android/app/upload-keystore.jks` with `android/keystore.properties` (already configured).
+  - Manual upload:
+    - Play Console → Your app → (Internal testing or Production) → Create release → upload the AAB above → enter release notes → roll out.
+  - Automated upload (Fastlane):
+    - Provide Google Play service account JSON at `fastlane/play.json` (or set `PLAY_JSON`/`PLAY_JSON_PATH`).
+    - `fastlane android internal` (uploads to Internal track); adjust `track:` in `fastlane/Fastfile` for beta/production as needed.
+  - Service account creation (summary): Play Console → Setup → API access → link GCP project → create service account → grant app access → in GCP, create JSON key → save as `fastlane/play.json`.
+
+Quick paths
+- iOS IPA: `build/ios/ipa/`
+- Android AAB: `build/app/outputs/bundle/prodRelease/`
+
+Current release baseline
+- iOS: 1.0.1 (12) uploaded to TestFlight.
+- Android: ready to upload `app-prod-release.aab` (1.0.1/12).
