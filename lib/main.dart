@@ -3,14 +3,15 @@ import 'package:flutter/services.dart';
 import 'package:audioplayers/audioplayers.dart';
 
 import 'src/menu/menu_page.dart';
+import 'src/lemans/lemans_page.dart' show warmupAudioCaches; // prewarm audio bytes
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // Configure global audio context to ensure playback works even with the silent switch on iOS
   await AudioPlayer.global.setAudioContext(AudioContext(
-    iOS: const AudioContextIOS(
+    iOS: AudioContextIOS(
       category: AVAudioSessionCategory.playback,
-      options: [],
+      options: <AVAudioSessionOptions>{},
     ),
     android: const AudioContextAndroid(
       contentType: AndroidContentType.music,
@@ -20,6 +21,8 @@ Future<void> main() async {
       stayAwake: false,
     ),
   ));
+  // Prewarm synthesized audio caches before first frame
+  warmupAudioCaches();
   SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
   runApp(const RaceDriverApp());
 }

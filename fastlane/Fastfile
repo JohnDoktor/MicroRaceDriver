@@ -66,7 +66,7 @@ platform :ios do
       app_identifier: "dk.johndoktor.racedriver",
       app_platform: "ios",
       skip_submission: true,
-      skip_waiting_for_build_processing: false
+      skip_waiting_for_build_processing: true
     )
   end
 

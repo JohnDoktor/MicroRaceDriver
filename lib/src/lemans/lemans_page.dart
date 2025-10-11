@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'palette.dart';
 import 'dart:typed_data';
-import 'dart:io';
 import 'package:audioplayers/audioplayers.dart';
 import '../config.dart';
 
@@ -327,7 +326,6 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
             }
             model.fireCooldown = 1.0 / rate;
             model.muzzle = 0.08; // brief muzzle flash
-            audio.beep(1400, 20);
           }
         }
         // Level up every 120s of runtime
@@ -515,31 +513,16 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
         model.pickupCooldown = base;
         final lane = (rng.nextInt(3) - 1) * 0.5;
         final roll = rng.nextDouble();
-        if (model.config.debugGunCradles) {
-          // Debug: make gun cradle very frequent (≈90%)
-          if (roll < 0.05) {
-            model.pickups.add(_Pickup(_PickupType.fuel, lane.toDouble(), 1.05));
-          } else if (roll < 0.10) {
-            model.pickups.add(_Pickup(_PickupType.nitro, lane.toDouble(), 1.05));
-          } else if (roll < 0.95) {
-            model.pickups.add(_Pickup(_PickupType.gun, lane.toDouble(), 1.05));
-          } else {
-            for (final l in [-0.5, 0.0, 0.5]) {
-              model.pickups.add(_Pickup(_PickupType.coin, l.toDouble(), 1.05 + rng.nextDouble() * 0.05));
-            }
-          }
+        // Normal distributions: Fuel 60%, Nitro 20%, Gun 10%, Coin 10%
+        if (roll < 0.6) {
+          model.pickups.add(_Pickup(_PickupType.fuel, lane.toDouble(), 1.05));
+        } else if (roll < 0.8) {
+          model.pickups.add(_Pickup(_PickupType.nitro, lane.toDouble(), 1.05));
+        } else if (roll < 0.9) {
+          model.pickups.add(_Pickup(_PickupType.gun, lane.toDouble(), 1.05));
         } else {
-          // Normal distributions: Fuel 60%, Nitro 20%, Gun 10%, Coin 10%
-          if (roll < 0.6) {
-            model.pickups.add(_Pickup(_PickupType.fuel, lane.toDouble(), 1.05));
-          } else if (roll < 0.8) {
-            model.pickups.add(_Pickup(_PickupType.nitro, lane.toDouble(), 1.05));
-          } else if (roll < 0.9) {
-            model.pickups.add(_Pickup(_PickupType.gun, lane.toDouble(), 1.05));
-          } else {
-            for (final l in [-0.5, 0.0, 0.5]) {
-              model.pickups.add(_Pickup(_PickupType.coin, l.toDouble(), 1.05 + rng.nextDouble() * 0.05));
-            }
+          for (final l in [-0.5, 0.0, 0.5]) {
+            model.pickups.add(_Pickup(_PickupType.coin, l.toDouble(), 1.05 + rng.nextDouble() * 0.05));
           }
         }
       }
@@ -925,10 +908,9 @@ class _GameTickerState extends State<_GameTicker> with SingleTickerProviderState
           _painter.safeTopPadding = media.padding.top;
           // keep audio mixers in sync with config each frame
           // Keep audio mixers in sync with config each frame
-          // Apply menu config; in low graphics, mute SFX/engine to avoid CPU spikes
+          // Low graphics should NOT mute sounds (per request)
           final mus = model.config.musicEnabled ? model.config.musicVolume : 0.0;
-          final sfxBase = model.config.sfxEnabled ? model.config.sfxVolume : 0.0;
-          final sfx = model.config.lowGraphics ? 0.0 : sfxBase;
+          final sfx = model.config.sfxEnabled ? model.config.sfxVolume : 0.0;
           _engine.master = sfx; // engine treated as SFX
           audio.sfxVolume = sfx;
           _music.setVolume(mus);
@@ -1117,17 +1099,6 @@ class _LeMansPainter extends CustomPainter {
       final fill = Paint()..color = col.withValues(alpha: alpha * 0.2);
       canvas.drawCircle(Offset(cx, cy), radius, fill);
       canvas.drawCircle(Offset(cx, cy), radius, ring);
-      // simple debris spokes
-      final debris = Paint()..color = col..strokeWidth = 2;
-      const spokeCount = 6;
-      for (int i = 0; i < spokeCount; i++) {
-        final ang = (i / spokeCount) * 2 * math.pi + p * 0.8;
-        final r1 = radius * 0.3;
-        final r2 = radius * 0.9;
-        final a = Offset(cx + r1 * math.cos(ang), cy + r1 * math.sin(ang));
-        final b = Offset(cx + r2 * math.cos(ang), cy + r2 * math.sin(ang));
-        canvas.drawLine(a, b, debris);
-      }
     }
 
     // Traffic
@@ -1610,108 +1581,130 @@ class _LeMansPainter extends CustomPainter {
 }
 
 class _Audio {
-  final AudioPlayer _player = AudioPlayer()..setPlayerMode(PlayerMode.lowLatency);
+  // Small pool of low-latency players to avoid frequent allocation
+  final List<AudioPlayer> _pool =
+      List.generate(4, (_) => AudioPlayer()..setPlayerMode(PlayerMode.lowLatency));
+  int _next = 0;
   double sfxVolume = 1.0; // master SFX volume 0..1
-  Future<void> beep(int freq, int ms) async {
-    if (sfxVolume <= 0) return;
+
+  // In-memory shared cache for pre-made SFX
+  static final Map<String, Uint8List> _cache = {};
+
+  _Audio() {
+    _warmup();
+  }
+
+  static void _warmup() {
+    // Pre-generate common SFX we use throughout the game
+    // Beeps
+    for (final f in [440, 660, 700, 760, 880, 990, 1000, 1200, 1320, 540]) {
+      for (final ms in [40, 50, 60, 70, 80, 90, 120, 140, 150, 180]) {
+        _getSine(f, ms);
+      }
+    }
+    // Noise durations used
+    for (final ms in [90, 120, 140]) {
+      _getNoise(ms);
+    }
+    // Crash thud
+    _getSine(180, 120);
+  }
+
+  static String _kSine(int f, int ms) => 'sine:$f:$ms';
+  static String _kNoise(int ms) => 'noise:$ms';
+
+  static Uint8List _getSine(int freq, int ms) {
+    final k = _kSine(freq, ms);
+    final v = _cache[k];
+    if (v != null) return v;
+    final bytes = _sineWavBytes(freq: freq, ms: ms);
+    _cache[k] = bytes;
+    return bytes;
+  }
+
+  static Uint8List _getNoise(int ms) {
+    final k = _kNoise(ms);
+    final v = _cache[k];
+    if (v != null) return v;
+    final bytes = _noiseWavBytes(ms: ms);
+    _cache[k] = bytes;
+    return bytes;
+  }
+
+  Future<void> _playCached(Uint8List bytes, double volFactor) async {
+    if (sfxVolume <= 0 || volFactor <= 0) return;
     try {
-      final bytes = _sineWavBytes(freq: freq, ms: ms, vol: 0.7 * sfxVolume);
-      final path = await _writeTempWav(bytes, prefix: 'beep');
-      await _player.play(DeviceFileSource(path));
+      final p = _pool[_next];
+      _next = (_next + 1) % _pool.length;
+      await p.stop();
+      await p.setVolume((sfxVolume * volFactor).clamp(0.0, 1.0));
+      await p.play(BytesSource(bytes, mimeType: 'audio/wav'));
     } catch (_) {}
   }
 
+  Future<void> beep(int freq, int ms) async {
+    final bytes = _getSine(freq, ms);
+    await _playCached(bytes, 0.7);
+  }
+
   Future<void> whoosh() async {
-    if (sfxVolume <= 0) return;
     try {
-      final p = AudioPlayer()..setPlayerMode(PlayerMode.lowLatency);
-      final p1 = await _writeTempWav(_sineWavBytes(freq: 700, ms: 40, vol: 0.6 * sfxVolume), prefix: 'wh1');
-      await p.play(DeviceFileSource(p1));
+      await _playCached(_getSine(700, 40), 0.6);
       await Future.delayed(const Duration(milliseconds: 35));
-      final p2 = await _writeTempWav(_sineWavBytes(freq: 1000, ms: 40, vol: 0.6 * sfxVolume), prefix: 'wh2');
-      await p.play(DeviceFileSource(p2));
-      await Future.delayed(const Duration(milliseconds: 100));
-      await p.stop();
-      p.dispose();
+      await _playCached(_getSine(1000, 40), 0.6);
     } catch (_) {}
   }
 
   // New synthesized effects
   Future<void> screech() async {
     // short rising tone + noise burst
-    if (sfxVolume <= 0) return;
     try {
-      final p = AudioPlayer()..setPlayerMode(PlayerMode.lowLatency);
-      final s1 = await _writeTempWav(_sineWavBytes(freq: 1200, ms: 60, vol: 0.5 * sfxVolume), prefix: 'scr');
-      await p.play(DeviceFileSource(s1));
-      final s2 = await _writeTempWav(_noiseWavBytes(ms: 90, vol: 0.35 * sfxVolume), prefix: 'scrN');
-      await p.play(DeviceFileSource(s2));
-      await Future.delayed(const Duration(milliseconds: 180));
-      await p.stop();
-      p.dispose();
+      await _playCached(_getSine(1200, 60), 0.5);
+      await _playCached(_getNoise(90), 0.35);
     } catch (_) {}
   }
 
   Future<void> splash() async {
     // short filtered noise burst
-    if (sfxVolume <= 0) return;
     try {
-      final p = AudioPlayer()..setPlayerMode(PlayerMode.lowLatency);
-      final s = await _writeTempWav(_noiseWavBytes(ms: 120, vol: 0.45 * sfxVolume), prefix: 'spl');
-      await p.play(DeviceFileSource(s));
-      await Future.delayed(const Duration(milliseconds: 140));
-      await p.stop();
-      p.dispose();
+      await _playCached(_getNoise(120), 0.45);
     } catch (_) {}
   }
 
   Future<void> crash() async {
     // thud (low sine) + noise
-    if (sfxVolume <= 0) return;
     try {
-      final p = AudioPlayer()..setPlayerMode(PlayerMode.lowLatency);
-      final s1 = await _writeTempWav(_sineWavBytes(freq: 180, ms: 120, vol: 0.95 * sfxVolume), prefix: 'cr1');
-      await p.play(DeviceFileSource(s1));
-      final s2 = await _writeTempWav(_noiseWavBytes(ms: 140, vol: 0.8 * sfxVolume), prefix: 'cr2');
-      await p.play(DeviceFileSource(s2));
-      await Future.delayed(const Duration(milliseconds: 220));
-      await p.stop();
-      p.dispose();
+      await _playCached(_getSine(180, 120), 0.95);
+      await _playCached(_getNoise(140), 0.8);
     } catch (_) {}
   }
 
   Future<void> gameOver() async {
-    if (sfxVolume <= 0) return;
     try {
-      final p = AudioPlayer()..setPlayerMode(PlayerMode.lowLatency);
-      final a = await _writeTempWav(_sineWavBytes(freq: 660, ms: 120, vol: 0.5 * sfxVolume), prefix: 'go1');
-      await p.play(DeviceFileSource(a));
-      final b = await _writeTempWav(_sineWavBytes(freq: 440, ms: 150, vol: 0.6 * sfxVolume), prefix: 'go2');
-      await p.play(DeviceFileSource(b));
-      final c = await _writeTempWav(_sineWavBytes(freq: 330, ms: 180, vol: 0.6 * sfxVolume), prefix: 'go3');
-      await p.play(DeviceFileSource(c));
-      await Future.delayed(const Duration(milliseconds: 500));
-      await p.stop();
-      p.dispose();
+      await _playCached(_getSine(660, 120), 0.5);
+      await _playCached(_getSine(440, 150), 0.6);
+      await _playCached(_getSine(330, 180), 0.6);
     } catch (_) {}
   }
 
   Future<void> explosion() async {
     // short white-noise burst for explosions
-    if (sfxVolume <= 0) return;
     try {
-      final p = AudioPlayer()..setPlayerMode(PlayerMode.lowLatency);
-      final n1 = await _writeTempWav(_noiseWavBytes(ms: 90, vol: 0.8 * sfxVolume), prefix: 'exp1');
-      await p.play(DeviceFileSource(n1));
-      await Future.delayed(const Duration(milliseconds: 100));
-      await p.stop();
-      p.dispose();
+      await _playCached(_getNoise(90), 0.8);
     } catch (_) {}
   }
 
   void dispose() {
-    _player.dispose();
+    for (final p in _pool) {
+      p.dispose();
+    }
   }
+}
+
+// Top-level warmup that can be called before first frame
+void warmupAudioCaches() {
+  _Audio._warmup();
+  _Music.prewarm();
 }
 
 class _HudTextCache {
@@ -1730,7 +1723,7 @@ class _HudTextCache {
   }
 }
 
-Uint8List _sineWavBytes({required int freq, required int ms, double vol = 1.0}) {
+Uint8List _sineWavBytes({required int freq, required int ms}) {
   const sampleRate = 22050;
   final totalSamples = (sampleRate * ms / 1000).floor();
   final data = BytesBuilder();
@@ -1747,14 +1740,14 @@ Uint8List _sineWavBytes({required int freq, required int ms, double vol = 1.0}) 
   // samples
   for (int i = 0; i < totalSamples; i++) {
     final t = i / sampleRate;
-    final s = (math.sin(2 * math.pi * freq * t) * 0.5 * vol);
+    final s = (math.sin(2 * math.pi * freq * t) * 0.5);
     final v = (s * 32767).clamp(-32768, 32767).toInt();
     w16(v);
   }
   return data.toBytes();
 }
 
-Uint8List _noiseWavBytes({required int ms, double vol = 1.0}) {
+Uint8List _noiseWavBytes({required int ms}) {
   const sampleRate = 22050;
   final totalSamples = (sampleRate * ms / 1000).floor();
   final data = BytesBuilder();
@@ -1771,20 +1764,14 @@ Uint8List _noiseWavBytes({required int ms, double vol = 1.0}) {
   final rand = math.Random();
   for (int i = 0; i < totalSamples; i++) {
     // simple white noise, scaled
-    final s = ((rand.nextDouble() * 2 - 1) * 0.4 * vol);
+    final s = ((rand.nextDouble() * 2 - 1) * 0.4);
     final v = (s * 32767).clamp(-32768, 32767).toInt();
     w16(v);
   }
   return data.toBytes();
 }
 
-Future<String> _writeTempWav(Uint8List bytes, {String prefix = 'snd'}) async {
-  final dir = Directory.systemTemp;
-  final path = '${dir.path}/racedriver_${prefix}_${DateTime.now().microsecondsSinceEpoch}.wav';
-  final f = File(path);
-  await f.writeAsBytes(bytes, flush: true);
-  return path;
-}
+// File writing helper no longer required with in-memory playback
 
 Uint8List _engineWavBytes({required int freq, required int ms}) {
   // Resonant-noise engine: pulse train at f0 + filtered noise through resonators
@@ -1863,7 +1850,7 @@ class _EngineAudio {
   int _lastFreq = 0;
   double _currentVol = 0.0;
   double master = 1.0;
-  final Map<int, String> _cache = {};
+  final Map<int, Uint8List> _bytesCache = {}; // loop bytes per freq
   AudioPlayer get _curr => _usingA ? _a : _b;
   AudioPlayer get _next => _usingA ? _b : _a;
 
@@ -1876,10 +1863,10 @@ class _EngineAudio {
     final freq = (140 + speed * 320).round();
     final targetVol = (0.02 + speed * 0.06) * master; // further reduced engine loudness
     if (!_started) {
-      final path = await _pathForFreq(freq);
       await _a.setReleaseMode(ReleaseMode.loop);
       await _a.setVolume(targetVol.clamp(0.0, 1.0));
-      await _a.play(DeviceFileSource(path));
+      final bytes = await _bytesForFreq(freq);
+      await _a.play(BytesSource(bytes, mimeType: 'audio/wav'));
       _usingA = true;
       _started = true;
       _lastFreq = freq;
@@ -1889,12 +1876,12 @@ class _EngineAudio {
     final df = (freq - _lastFreq).abs();
     if (df > 20 && !_xfading) {
       // Crossfade to new loop to avoid gaps
-      final path = await _pathForFreq(freq);
       final from = _curr;
       final to = _next;
       await to.setReleaseMode(ReleaseMode.loop);
       await to.setVolume(0.0);
-      await to.play(DeviceFileSource(path));
+      final bytes = await _bytesForFreq(freq);
+      await to.play(BytesSource(bytes, mimeType: 'audio/wav'));
       _xfading = true;
       // small pre-roll so the 'to' player is actually running before ramp
       await Future.delayed(const Duration(milliseconds: 60));
@@ -1923,19 +1910,20 @@ class _EngineAudio {
       await p.setVolume(targetVol.clamp(0.0, 1.0));
       _currentVol = targetVol;
       // Fallback: if player stopped for any reason, restart current loop
-      final path = await _pathForFreq(_lastFreq == 0 ? freq : _lastFreq);
       // This call is safe; if already playing, player will ignore
-      await p.play(DeviceFileSource(path));
+      final bytes = await _bytesForFreq(_lastFreq == 0 ? freq : _lastFreq);
+      await p.play(BytesSource(bytes, mimeType: 'audio/wav'));
     }
   }
 
-  Future<String> _pathForFreq(int freq) async {
-    if (_cache.containsKey(freq)) return _cache[freq]!;
+  Future<Uint8List> _bytesForFreq(int freq) async {
+    if (_bytesCache.containsKey(freq)) return _bytesCache[freq]!;
     final bytes = _engineWavBytes(freq: freq, ms: 2000);
-    final path = await _writeTempWav(bytes, prefix: 'eng_$freq');
-    _cache[freq] = path;
-    return path;
+    _bytesCache[freq] = bytes;
+    return bytes;
   }
+
+  // File path no longer needed with BytesSource for engine
 
   void dispose() {
     _a.dispose();
@@ -1953,20 +1941,25 @@ class _Music {
   final AudioPlayer _p = AudioPlayer();
   bool _started = false;
   double master = 0.18; // half of previous default
+  Uint8List? _loop; // cached music loop bytes (instance)
+  static Uint8List? _sharedLoop; // shared prewarmed loop
+
+  static void prewarm() {
+    _sharedLoop ??= _makeLoop();
+  }
   Future<void> start() async {
     if (_started) return;
-    final bytes = _makeLoop();
+    _loop ??= (_sharedLoop ??= _makeLoop());
     await _p.setReleaseMode(ReleaseMode.loop);
     await _p.setVolume(master);
-    final path = await _writeTempWav(bytes, prefix: 'music');
-    await _p.play(DeviceFileSource(path));
+    await _p.play(BytesSource(_loop!, mimeType: 'audio/wav'));
     _started = true;
   }
   Future<void> stop() async { if (_started) { await _p.stop(); _started = false; } }
   Future<void> setVolume(double v) async { master = v.clamp(0.0, 1.0); await _p.setVolume(master); }
   void dispose() { _p.dispose(); }
 
-  Uint8List _makeLoop() {
+  static Uint8List _makeLoop() {
     // 32-bar chiptune at 120 BPM (4/4), 16th-note steps with A/B/C/D sections for variation
     const sr = 22050;
     const bpm = 120.0;
@@ -1978,7 +1971,7 @@ class _Music {
     final totalSamples = (steps * stepSec * sr).round();
     final mix = List<double>.filled(totalSamples, 0.0);
 
-    double noteHz(int midi) => 440.0 * math.pow(2.0, (midi - 69) / 12.0);
+    double noteHz(int midi) => 440.0 * math.pow(2.0, (midi - 69) / 12.0) as double;
     double square(double t, double hz, {double duty = 0.5}) {
       final phase = (t * hz) % 1.0;
       return phase < duty ? 1.0 : -1.0;

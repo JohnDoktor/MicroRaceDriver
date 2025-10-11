@@ -89,6 +89,35 @@ Build and distribute to TestFlight group, notify testers
 
 ----
 
+
+## Android
+
+### android build
+
+```sh
+[bundle exec] fastlane android build
+```
+
+Build Android App Bundle (prod)
+
+### android upload_internal
+
+```sh
+[bundle exec] fastlane android upload_internal
+```
+
+Upload Android AAB to Internal testing on Google Play
+
+### android internal
+
+```sh
+[bundle exec] fastlane android internal
+```
+
+Build and upload to Internal testing
+
+----
+
 This README.md is auto-generated and will be re-generated every time [_fastlane_](https://fastlane.tools) is run.
 
 More information about _fastlane_ can be found on [fastlane.tools](https://fastlane.tools).
