@@ -1,16 +1,29 @@
-# race_driver
+# MicroRaceDriver (Flutter)
 
-A new Flutter project.
+A retro, C64‑inspired top‑down racer built in Flutter. The game renders with `CustomPainter` (road, cars, HUD, night lighting) and uses fully synthesized audio (engine, SFX, music). It targets iOS and Android and is optimized for smooth frame pacing on iOS.
 
-## Getting Started
+Highlights
+- Painter‑first rendering: dual headlight cones at night, emissive tail lights, readable HUD.
+- Core loop: lane driving, AI traffic, hazards, pickups, lives, score, fuel, difficulty ramp.
+- Controls: swipe‑only steering with a brief “Swipe to steer” hint.
+- Nitro: boosts world flow and raises HUD top speed.
+- Audio: synthesized resonant‑noise engine, chiptune music loop, crunchy SFX.
+- Performance: low‑graphics path on iOS, lighter blurs, painter‑driven repaints, prewarmed audio bytes.
 
-This project is a starting point for a Flutter application.
+Run (local)
+- `flutter pub get`
+- iOS Simulator: `open -a Simulator && flutter devices && flutter run -d <sim>`
+- Android: `flutter run -d <device-id>`
 
-A few resources to get you started if this is your first Flutter project:
+Build
+- iOS (IPA): `flutter build ipa`
+- Android (AAB, prod flavor): `flutter build appbundle --release --flavor prod`
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+Notes
+- Secrets and private files are intentionally excluded from the repository (see `.gitignore` and pre‑push hook). Do not commit:
+  - `fastlane/api_key.json`, `fastlane/play.json`, `android/keystore.properties`, `android/app/*.jks`
+  - Logs and build artifacts
+- Example templates are provided at `fastlane/api_key.json.example` and `fastlane/play.json.example`.
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+License
+- Add a license here if you intend to open‑source the project.
