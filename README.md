@@ -21,8 +21,8 @@ Highlights
 Case Study
 - Full write‑up: https://www.johndoktor.dk/l/microracedriver-shipping-a-retro-racer-with-llm-pair-programming/
 
-Quick Demo
-- YouTube: https://www.youtube.com/watch?v=FNbtjCjJLJc
+Project Video
+- YouTube (overview/explanation): https://www.youtube.com/watch?v=FNbtjCjJLJc
 
 License
 - MIT License © 2025 John Doktor — see `LICENSE` for full terms. You are free to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the software, subject to inclusion of the copyright and permission notice.
