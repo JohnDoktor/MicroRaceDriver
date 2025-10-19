@@ -2,6 +2,10 @@
 
 A retro, C64‑inspired top‑down racer built in Flutter. The game renders with `CustomPainter` (road, cars, HUD, night lighting) and uses fully synthesized audio (engine, SFX, music). It targets iOS and Android and is optimized for smooth frame pacing on iOS.
 
+About
+- Built and shipped with AI (zero‑code). I provided direction, testing, and distribution decisions; the AI wrote code, compiled, ran the simulator, read logs, and fixed issues.
+- Full case study and devlog linked below.
+
 Highlights
 - Painter‑first rendering: dual headlight cones at night, emissive tail lights, readable HUD.
 - Core loop: lane driving, AI traffic, hazards, pickups, lives, score, fuel, difficulty ramp.
@@ -12,6 +16,9 @@ Highlights
 
 Case Study
 - Full write‑up: https://www.johndoktor.dk/l/microracedriver-shipping-a-retro-racer-with-llm-pair-programming/
+
+License
+- MIT — see `LICENSE`.
 
 Run (local)
 - `flutter pub get`

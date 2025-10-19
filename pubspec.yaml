@@ -1,5 +1,5 @@
 name: race_driver
-description: "A new Flutter project."
+description: "Retro top‑down racer with CustomPainter and synthesized audio. Built and shipped with AI (zero‑code)."
 homepage: https://www.johndoktor.dk/l/microracedriver-shipping-a-retro-racer-with-llm-pair-programming/
 repository: https://github.com/JohnDoktor/MicroRaceDriver
 # The following line prevents the package from being accidentally published to
