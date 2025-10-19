@@ -1,0 +1,9 @@
+{
+  "key_id": "ABCD1234EF",
+  "issuer_id": "00000000-0000-0000-0000-000000000000",
+  "key": "<paste contents of your .p8 here>",
+  "in_house": false
+}
+
+# Save as fastlane/api_key.json and keep it out of git.
+# .gitignore already excludes fastlane/api_key.json.

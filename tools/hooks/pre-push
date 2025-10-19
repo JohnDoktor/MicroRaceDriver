@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Skip with env var if absolutely necessary
+if [[ "${SKIP_SECRET_SCAN:-}" == "1" ]]; then
+  echo "[pre-push] Secret scan skipped (SKIP_SECRET_SCAN=1)"
+  exit 0
+fi
+
+has_cmd() { command -v "$1" >/dev/null 2>&1; }
+
+echo "[pre-push] Running outgoing secret scan..."
+
+# Collect refs from stdin: local_ref local_sha remote_ref remote_sha
+readarray -t REFS
+RANGES=()
+if [[ ${#REFS[@]} -eq 0 ]]; then
+  # Fallback: scan HEAD
+  RANGES+=("HEAD")
+else
+  for line in "${REFS[@]}"; do
+    set +e
+    read -r local_ref local_sha remote_ref remote_sha <<<"$line"
+    set -e
+    # When creating a new branch, remote_sha can be 0000...
+    if [[ -n "${local_sha:-}" ]]; then
+      if [[ -n "${remote_sha:-}" && "$remote_sha" != 0000000000000000000000000000000000000000 ]]; then
+        RANGES+=("$remote_sha..$local_sha")
+      else
+        RANGES+=("$local_sha")
+      fi
+    fi
+  done
+fi
+
+paths_regex='(?i)(api_key\.json|play\.json|google-services\.json|GoogleService-Info\.plist|\\.jks$|keystore\.properties$|\\.p12$|\\.p8$|\\.pem$|\\.der$|^docs/|^pw/)'
+content_regex='(-----BEGIN [A-Z ]+PRIVATE KEY-----|PRIVATE KEY-----|"private_key"\s*:\s*"-----BEGIN|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|ghp_[A-Za-z0-9]{36,}|xox[baprs]-[A-Za-z0-9-]{10,}|slack.+token|password\s*=|passwd\s*=|secret\s*=)'
+
+fail=0
+for range in "${RANGES[@]}"; do
+  echo "[pre-push] Scanning range: $range"
+  # Path scan
+  changed=$(git diff --name-only "$range" || git show --pretty= --name-only "$range" || true)
+  if [[ -n "$changed" ]]; then
+    if echo "$changed" | rg -n "$paths_regex" -S >/dev/null; then
+      echo "[pre-push][ERROR] Outgoing changes include restricted paths (docs/, pw/, or secret files)."
+      echo "$changed" | rg -n "$paths_regex" -S || true
+      fail=1
+    fi
+  fi
+
+  # Content scan using gitleaks if available, else fallback to git grep
+  if has_cmd gitleaks; then
+    if ! gitleaks detect --no-banner --redact --log-opts "$range" >/dev/null; then
+      echo "[pre-push][ERROR] Gitleaks detected potential secrets in $range"
+      fail=1
+    fi
+  else
+    if ! git grep -I -n -E "$content_regex" "$range" >/dev/null 2>&1; then
+      : # no matches
+    else
+      echo "[pre-push][ERROR] Potential secret patterns found in $range"
+      git grep -I -n -E "$content_regex" "$range" || true
+      fail=1
+    fi
+  fi
+done
+
+if [[ $fail -ne 0 ]]; then
+  echo "[pre-push] Push blocked by secret scan. To bypass temporarily: SKIP_SECRET_SCAN=1 git push (not recommended)."
+  exit 1
+fi
+
+echo "[pre-push] OK"
+exit 0
+
