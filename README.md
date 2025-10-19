@@ -22,7 +22,7 @@ Case Study
 - Full write‑up: https://www.johndoktor.dk/l/microracedriver-shipping-a-retro-racer-with-llm-pair-programming/
 
 License
-- MIT — see `LICENSE`.
+- MIT License © 2025 John Doktor — see `LICENSE` for full terms. You are free to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the software, subject to inclusion of the copyright and permission notice.
 
 Run (local)
 - `flutter pub get`
