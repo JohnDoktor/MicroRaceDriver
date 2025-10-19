@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Project blog / case study
+    url: https://www.johndoktor.dk/l/microracedriver-shipping-a-retro-racer-with-llm-pair-programming/
+    about: Background, timeline, and technical details

@@ -21,6 +21,9 @@ Highlights
 Case Study
 - Full write‑up: https://www.johndoktor.dk/l/microracedriver-shipping-a-retro-racer-with-llm-pair-programming/
 
+Quick Demo
+- YouTube: https://www.youtube.com/watch?v=FNbtjCjJLJc
+
 License
 - MIT License © 2025 John Doktor — see `LICENSE` for full terms. You are free to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the software, subject to inclusion of the copyright and permission notice.
 
@@ -38,3 +41,10 @@ Notes
   - `fastlane/api_key.json`, `fastlane/play.json`, `android/keystore.properties`, `android/app/*.jks`
   - Logs and build artifacts
 - Example templates are provided at `fastlane/api_key.json.example` and `fastlane/play.json.example`.
+- Install the pre‑push hook locally (scans for secrets): `bash tools/install-hooks.sh`
+
+Known Issues / Roadmap
+- Persist Music/SFX toggles (e.g., `SharedPreferences`).
+- Optional input polish: keyboard/haptics per platform.
+- Minor HUD/lighting tuning passes as we get playtest feedback.
+- Consider a minimal CI later (format/lint) if contributions grow.
