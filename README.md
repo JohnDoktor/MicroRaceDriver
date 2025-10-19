@@ -10,6 +10,9 @@ Highlights
 - Audio: synthesized resonant‑noise engine, chiptune music loop, crunchy SFX.
 - Performance: low‑graphics path on iOS, lighter blurs, painter‑driven repaints, prewarmed audio bytes.
 
+Case Study
+- Full write‑up: https://www.johndoktor.dk/l/microracedriver-shipping-a-retro-racer-with-llm-pair-programming/
+
 Run (local)
 - `flutter pub get`
 - iOS Simulator: `open -a Simulator && flutter devices && flutter run -d <sim>`
