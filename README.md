@@ -1,5 +1,9 @@
 # MicroRaceDriver (Flutter)
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Flutter](https://img.shields.io/badge/Flutter-3.x-blue?logo=flutter)](https://flutter.dev)
+[![Case Study](https://img.shields.io/badge/Blog-Case%20Study-orange)](https://www.johndoktor.dk/l/microracedriver-shipping-a-retro-racer-with-llm-pair-programming/)
+
 A retro, C64‑inspired top‑down racer built in Flutter. The game renders with `CustomPainter` (road, cars, HUD, night lighting) and uses fully synthesized audio (engine, SFX, music). It targets iOS and Android and is optimized for smooth frame pacing on iOS.
 
 About
