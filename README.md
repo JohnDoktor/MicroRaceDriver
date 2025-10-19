@@ -38,6 +38,3 @@ Notes
   - `fastlane/api_key.json`, `fastlane/play.json`, `android/keystore.properties`, `android/app/*.jks`
   - Logs and build artifacts
 - Example templates are provided at `fastlane/api_key.json.example` and `fastlane/play.json.example`.
-
-License
-- Add a license here if you intend to open‑source the project.
